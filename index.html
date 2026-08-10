@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Bloom</title>
+<meta name="description" content="See which friendships need a little water." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='9' r='6' fill='%239FC474'/%3E%3Ccircle cx='23' cy='16' r='6' fill='%239FC474'/%3E%3Ccircle cx='16' cy='23' r='6' fill='%239FC474'/%3E%3Ccircle cx='9' cy='16' r='6' fill='%239FC474'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%236f9a3f'/%3E%3C/svg%3E" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<div id="loading-screen">
+  <div class="loading-flower">
+    <div class="petal p1"></div><div class="petal p2"></div>
+    <div class="petal p3"></div><div class="petal p4"></div>
+    <div class="center"></div>
+  </div>
+</div>
+
+<div id="app" hidden>
+
+  <!-- Sign in / Sign up -->
+  <section id="view-signin" class="view">
+    <div class="auth-card">
+      <div class="auth-mark">
+        <svg viewBox="0 0 44 44" width="44" height="44" aria-hidden="true">
+          <circle cx="22" cy="8" r="8" fill="#9FC474"/>
+          <circle cx="36" cy="22" r="8" fill="#9FC474"/>
+          <circle cx="22" cy="36" r="8" fill="#9FC474"/>
+          <circle cx="8" cy="22" r="8" fill="#9FC474"/>
+          <circle cx="22" cy="22" r="6.5" fill="#6f9a3f"/>
+        </svg>
+        <div class="wordmark">Bloom</div>
+        <div class="subhead">See which friendships need a little water</div>
+      </div>
+      <form id="signin-form" class="auth-form">
+        <input type="email" id="signin-email" placeholder="Email" autocomplete="email" required />
+        <input type="password" id="signin-password" placeholder="Password" autocomplete="current-password" required />
+        <button type="button" id="forgot-password" class="forgot-link">Forgot password?</button>
+        <p id="signin-error" class="form-error" hidden></p>
+        <p id="signin-success" class="form-success" hidden></p>
+        <button type="submit" class="btn-primary btn-block" id="signin-submit">Sign in</button>
+      </form>
+      <div class="auth-footer">
+        <span id="auth-toggle-label">New here?</span>
+        <button type="button" id="auth-toggle" class="link-btn">Create an account</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Dashboard -->
+  <section id="view-dashboard" class="view">
+    <div class="page">
+      <header class="dash-header">
+        <div class="dash-title">Your garden</div>
+        <button id="avatar-btn" class="avatar-btn" title="Account" aria-label="Account"></button>
+      </header>
+
+      <div id="category-tabs" class="category-tabs"></div>
+
+      <div id="prompt-banner" class="prompt-banner" hidden>
+        <div class="prompt-dot"></div>
+        <div class="prompt-body">
+          <div class="prompt-eyebrow">Today's prompt</div>
+          <div class="prompt-copy" id="prompt-copy"></div>
+        </div>
+        <button class="btn-pill-primary" id="prompt-cta">Log it</button>
+      </div>
+
+      <div id="friend-grid" class="friend-grid"></div>
+    </div>
+  </section>
+
+  <!-- Friend detail -->
+  <section id="view-friend" class="view">
+    <div class="page">
+      <button class="back-link" id="back-to-garden">&larr; Back to garden</button>
+
+      <div class="friend-header" id="friend-header">
+        <div class="friend-header-flower" id="friend-header-flower"></div>
+        <div class="friend-header-body">
+          <div>
+            <div class="friend-name" id="friend-name"></div>
+            <div class="friend-status" id="friend-status"></div>
+            <select id="friend-category-select" class="category-select"></select>
+          </div>
+          <div class="friend-actions">
+            <button class="btn-primary" id="log-contact-btn">+ Log contact</button>
+          </div>
+          <div class="location-card" id="location-card" hidden></div>
+          <div class="notes-row" id="notes-row"></div>
+        </div>
+      </div>
+
+      <div class="history-section">
+        <div class="section-title-row">
+          <div class="history-title">Events</div>
+          <button type="button" class="add-event-btn" id="add-event-btn">+ Add event</button>
+        </div>
+        <div id="events-list" class="history-list"></div>
+      </div>
+
+      <div class="history-section">
+        <div class="history-title">History</div>
+        <div id="history-list" class="history-list"></div>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<!-- Log contact modal -->
+<div id="modal-log-contact" class="modal-overlay" hidden>
+  <div class="modal-card">
+    <div class="modal-title" id="log-modal-title">Log contact</div>
+    <div class="modal-reminder" id="log-modal-reminder" hidden></div>
+    <div class="contact-type-list" id="contact-type-list">
+      <button type="button" class="contact-type-row" data-type="message">&#128172; Message</button>
+      <button type="button" class="contact-type-row" data-type="call">&#128222; Call</button>
+      <button type="button" class="contact-type-row" data-type="video">&#127909; Video call</button>
+    </div>
+    <div class="cup-section">
+      <div class="cup-label">How full was your cup?</div>
+      <div class="cup-row" id="cup-row"></div>
+      <div class="cup-caption"><span>barely</span><span>overflowing with love</span></div>
+    </div>
+    <button type="button" class="btn-primary btn-block" id="log-save-btn" disabled>Save</button>
+    <button type="button" class="modal-close" id="log-modal-close" aria-label="Close">&times;</button>
+  </div>
+</div>
+
+<!-- Add friend modal -->
+<div id="modal-add-friend" class="modal-overlay" hidden>
+  <div class="modal-card">
+    <div class="modal-title">Add a friend</div>
+    <div class="auth-form">
+      <input type="text" id="add-friend-name" placeholder="Name" required />
+      <input type="text" id="add-friend-location" placeholder="City, Country (optional)" />
+      <select id="add-friend-category"></select>
+      <input type="text" id="add-friend-new-category" placeholder="New tab name" hidden />
+    </div>
+    <button type="button" class="btn-primary btn-block" id="add-friend-save">Plant this friendship</button>
+    <button type="button" class="modal-close" id="add-friend-close" aria-label="Close">&times;</button>
+  </div>
+</div>
+
+<!-- Add category modal -->
+<div id="modal-add-category" class="modal-overlay" hidden>
+  <div class="modal-card">
+    <div class="modal-title">New tab</div>
+    <div class="auth-form">
+      <input type="text" id="add-category-name" placeholder="e.g. Coworkers" required />
+    </div>
+    <button type="button" class="btn-primary btn-block" id="add-category-save">Create tab</button>
+    <button type="button" class="modal-close" id="add-category-close" aria-label="Close">&times;</button>
+  </div>
+</div>
+
+<!-- Add note modal -->
+<div id="modal-add-note" class="modal-overlay" hidden>
+  <div class="modal-card">
+    <div class="modal-title">Add a note</div>
+    <div class="auth-form">
+      <select id="add-note-emoji">
+        <option value="&#9749;">&#9749; preference</option>
+        <option value="&#127874;">&#127874; birthday</option>
+        <option value="&#127957;">&#127957; interest</option>
+        <option value="&#128204;">&#128204; other</option>
+      </select>
+      <input type="text" id="add-note-text" placeholder="e.g. Oat milk latte, no sugar" required />
+    </div>
+    <button type="button" class="btn-primary btn-block" id="add-note-save">Save note</button>
+    <button type="button" class="modal-close" id="add-note-close" aria-label="Close">&times;</button>
+  </div>
+</div>
+
+<!-- Add event modal -->
+<div id="modal-add-event" class="modal-overlay" hidden>
+  <div class="modal-card">
+    <div class="modal-title">Add an event</div>
+    <div class="auth-form">
+      <select id="add-event-type">
+        <option value="birthday">&#127874; Birthday</option>
+        <option value="anniversary">&#128141; Anniversary</option>
+        <option value="wedding">&#128141; Wedding</option>
+        <option value="moving">&#128230; Moving</option>
+        <option value="workshop">&#128736;&#65039; Workshop</option>
+        <option value="other">&#128204; Other</option>
+      </select>
+      <input type="text" id="add-event-label" placeholder="Label (optional)" />
+      <input type="date" id="add-event-date" required />
+      <label class="checkbox-row">
+        <input type="checkbox" id="add-event-recurring" checked />
+        Repeats every year
+      </label>
+    </div>
+    <button type="button" class="btn-primary btn-block" id="add-event-save">Save event</button>
+    <button type="button" class="modal-close" id="add-event-close" aria-label="Close">&times;</button>
+  </div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
