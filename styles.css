@@ -96,6 +96,7 @@ input:focus-visible,button:focus-visible,select:focus-visible{
 /* Dashboard */
 .dash-header{display:flex;align-items:center;justify-content:space-between}
 .dash-title{font-size:24px;font-weight:700;color:var(--text)}
+.dash-header-actions{display:flex;align-items:center;gap:10px}
 .avatar-btn{
   width:38px;height:38px;border-radius:50%;background:var(--card);
   border:1px solid rgba(44,62,80,.1);cursor:pointer;
@@ -103,6 +104,49 @@ input:focus-visible,button:focus-visible,select:focus-visible{
   background-repeat:no-repeat;background-position:center;
 }
 .avatar-btn:hover{border-color:rgba(44,62,80,.25)}
+.settings-btn{
+  width:38px;height:38px;border-radius:50%;background:var(--card);
+  border:1px solid rgba(44,62,80,.1);cursor:pointer;font-size:16px;
+  display:flex;align-items:center;justify-content:center;line-height:1;
+}
+.settings-btn:hover{border-color:rgba(44,62,80,.25)}
+
+/* Settings / tiers */
+.settings-hint{font-size:13px;color:var(--muted);max-width:520px}
+.tiers-list{display:flex;flex-direction:column;gap:10px}
+.tier-row{
+  background:var(--card);border-radius:12px;padding:12px 14px;box-shadow:var(--shadow-card);
+  display:grid;grid-template-columns:40px 1fr 70px 12px 70px auto;align-items:center;gap:10px;
+}
+.tier-row input[type="color"]{
+  width:36px;height:36px;padding:0;border:1px solid rgba(44,62,80,.12);border-radius:8px;cursor:pointer;background:none;
+}
+.tier-row input[type="text"]{
+  border:1px solid rgba(44,62,80,.12);border-radius:10px;padding:8px 10px;font-size:14px;color:var(--text);min-width:0;
+}
+.tier-row input[type="number"]{
+  border:1px solid rgba(44,62,80,.12);border-radius:10px;padding:8px 8px;font-size:14px;color:var(--text);width:70px;
+}
+.tier-row-dash{color:var(--muted);text-align:center}
+.settings-actions{display:flex;align-items:center;gap:16px;margin-top:4px}
+@media (max-width:560px){
+  .tier-row{grid-template-columns:40px 1fr auto;row-gap:8px}
+  .tier-row input[type="text"]{grid-column:2/4}
+}
+
+.group-by-row{display:flex;align-items:center;gap:10px}
+.group-by-label{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
+.group-by-toggle{display:flex;gap:4px;background:var(--card);border-radius:20px;padding:3px;box-shadow:var(--shadow-card)}
+.group-by-toggle button{
+  background:none;border:none;font-size:13px;font-weight:600;color:var(--muted);
+  padding:6px 14px;border-radius:16px;cursor:pointer;font-family:inherit;
+}
+.group-by-toggle button.active{background:var(--text);color:#fff}
+
+.cadence-groups{display:flex;flex-direction:column;gap:24px}
+.cadence-section{display:flex;flex-direction:column;gap:12px}
+.cadence-section-title{font-size:14px;font-weight:600;color:var(--text)}
+.cadence-section-count{color:var(--muted);font-weight:500}
 
 .category-tabs{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .tab-pill{
@@ -132,6 +176,8 @@ input:focus-visible,button:focus-visible,select:focus-visible{
 .prompt-body{flex:1;min-width:0}
 .prompt-eyebrow{font-size:12px;font-weight:600;color:var(--sage);letter-spacing:.04em;text-transform:uppercase;margin-bottom:3px}
 .prompt-copy{font-size:15px;color:var(--text);font-weight:500}
+.prompt-actions{display:flex;align-items:center;gap:4px;flex:none}
+.prompt-actions .icon-btn{font-size:13px;font-weight:600;padding:8px 10px}
 
 .friend-grid{
   display:grid;grid-template-columns:repeat(2,1fr);gap:16px;
@@ -184,7 +230,8 @@ input:focus-visible,button:focus-visible,select:focus-visible{
 .notes-row{display:flex;flex-wrap:wrap;gap:8px}
 .note-pill{
   font-size:13px;font-weight:500;color:var(--text);background:var(--card);
-  border:1px solid rgba(44,62,80,.08);padding:6px 12px;border-radius:20px;
+  border:1px solid rgba(44,62,80,.08);padding:6px 6px 6px 12px;border-radius:20px;
+  display:inline-flex;align-items:center;gap:4px;
 }
 .add-note-pill{
   font-size:13px;font-weight:500;color:var(--coral);background:none;
@@ -198,7 +245,9 @@ input:focus-visible,button:focus-visible,select:focus-visible{
 .history-row{
   background:var(--card);border-radius:12px;padding:12px 16px;font-size:14px;
   color:var(--text);box-shadow:var(--shadow-card);
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
 }
+.history-row-text{min-width:0}
 .history-empty{color:var(--muted);font-size:13px}
 
 .section-title-row{display:flex;align-items:center;justify-content:space-between}
@@ -222,6 +271,21 @@ input:focus-visible,button:focus-visible,select:focus-visible{
 .event-export-btn:hover{background:rgba(136,176,75,.22)}
 .checkbox-row{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text)}
 .checkbox-row input{width:auto}
+
+.row-actions{display:flex;align-items:center;gap:2px;flex:none}
+.icon-btn{
+  background:none;border:none;color:var(--muted);cursor:pointer;font-family:inherit;
+  font-size:14px;line-height:1;padding:6px;border-radius:8px;flex:none;
+}
+.icon-btn:hover{background:rgba(44,62,80,.06);color:var(--text)}
+.icon-btn.danger:hover{background:rgba(255,111,97,.12);color:var(--coral-dark)}
+.note-pill .icon-btn{padding:3px;font-size:11px}
+
+.date-field{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--muted);font-weight:500}
+.date-field input{
+  border:1px solid rgba(44,62,80,.12);border-radius:12px;padding:10px 12px;
+  font-size:14px;color:var(--text);background:var(--card);
+}
 
 /* Modals */
 .modal-overlay{

@@ -57,8 +57,16 @@
     <div class="page">
       <header class="dash-header">
         <div class="dash-title">Your garden</div>
-        <button id="avatar-btn" class="avatar-btn" title="Account" aria-label="Account"></button>
+        <div class="dash-header-actions">
+          <button id="settings-btn" class="settings-btn" title="Settings" aria-label="Settings">&#9881;&#65039;</button>
+          <button id="avatar-btn" class="avatar-btn" title="Account" aria-label="Account"></button>
+        </div>
       </header>
+
+      <div class="group-by-row">
+        <span class="group-by-label">Group by</span>
+        <div id="group-by-toggle" class="group-by-toggle"></div>
+      </div>
 
       <div id="category-tabs" class="category-tabs"></div>
 
@@ -68,10 +76,15 @@
           <div class="prompt-eyebrow">Today's prompt</div>
           <div class="prompt-copy" id="prompt-copy"></div>
         </div>
-        <button class="btn-pill-primary" id="prompt-cta">Log it</button>
+        <div class="prompt-actions">
+          <button class="icon-btn" id="prompt-change" title="Change today's prompt">Change</button>
+          <button class="icon-btn" id="prompt-cancel" title="Cancel today's prompt">Cancel</button>
+          <button class="btn-pill-primary" id="prompt-cta">Log it</button>
+        </div>
       </div>
 
       <div id="friend-grid" class="friend-grid"></div>
+      <div id="cadence-groups" class="cadence-groups" hidden></div>
     </div>
   </section>
 
@@ -87,6 +100,13 @@
             <div class="friend-name" id="friend-name"></div>
             <div class="friend-status" id="friend-status"></div>
             <select id="friend-category-select" class="category-select"></select>
+            <select id="friend-cadence-select" class="category-select">
+              <option value="">Check-in cadence: not set</option>
+              <option value="weekly">Weekly</option>
+              <option value="biweekly">Every 2 weeks</option>
+              <option value="monthly">Monthly</option>
+              <option value="quarterly">Quarterly</option>
+            </select>
           </div>
           <div class="friend-actions">
             <button class="btn-primary" id="log-contact-btn">+ Log contact</button>
@@ -111,6 +131,22 @@
     </div>
   </section>
 
+  <!-- Settings -->
+  <section id="view-settings" class="view">
+    <div class="page">
+      <button class="back-link" id="back-to-garden-from-settings">&larr; Back to garden</button>
+      <div class="dash-title">Bloom tiers</div>
+      <div class="settings-hint">Each tier needs a score range (0–100, no gaps or overlaps) and a color — the rest of the flower's look is derived automatically.</div>
+      <div id="tiers-list" class="tiers-list"></div>
+      <button type="button" class="add-event-btn" id="add-tier-btn">+ Add tier</button>
+      <p id="tiers-error" class="form-error" hidden></p>
+      <div class="settings-actions">
+        <button type="button" class="btn-primary" id="save-tiers-btn">Save changes</button>
+        <button type="button" class="link-btn" id="reset-tiers-btn">Reset to defaults</button>
+      </div>
+    </div>
+  </section>
+
 </div>
 
 <!-- Log contact modal -->
@@ -128,8 +164,21 @@
       <div class="cup-row" id="cup-row"></div>
       <div class="cup-caption"><span>barely</span><span>overflowing with love</span></div>
     </div>
+    <label class="date-field">
+      <span>Date</span>
+      <input type="date" id="log-contact-date" />
+    </label>
     <button type="button" class="btn-primary btn-block" id="log-save-btn" disabled>Save</button>
     <button type="button" class="modal-close" id="log-modal-close" aria-label="Close">&times;</button>
+  </div>
+</div>
+
+<!-- Change prompt modal -->
+<div id="modal-change-prompt" class="modal-overlay" hidden>
+  <div class="modal-card">
+    <div class="modal-title">Change today's prompt</div>
+    <div class="contact-type-list" id="change-prompt-list"></div>
+    <button type="button" class="modal-close" id="change-prompt-close" aria-label="Close">&times;</button>
   </div>
 </div>
 
@@ -142,6 +191,13 @@
       <input type="text" id="add-friend-location" placeholder="City, Country (optional)" />
       <select id="add-friend-category"></select>
       <input type="text" id="add-friend-new-category" placeholder="New tab name" hidden />
+      <select id="add-friend-cadence">
+        <option value="">Check-in cadence: not set</option>
+        <option value="weekly">Weekly</option>
+        <option value="biweekly">Every 2 weeks</option>
+        <option value="monthly">Monthly</option>
+        <option value="quarterly">Quarterly</option>
+      </select>
     </div>
     <button type="button" class="btn-primary btn-block" id="add-friend-save">Plant this friendship</button>
     <button type="button" class="modal-close" id="add-friend-close" aria-label="Close">&times;</button>
@@ -163,7 +219,7 @@
 <!-- Add note modal -->
 <div id="modal-add-note" class="modal-overlay" hidden>
   <div class="modal-card">
-    <div class="modal-title">Add a note</div>
+    <div class="modal-title" id="add-note-modal-title">Add a note</div>
     <div class="auth-form">
       <select id="add-note-emoji">
         <option value="&#9749;">&#9749; preference</option>
@@ -181,7 +237,7 @@
 <!-- Add event modal -->
 <div id="modal-add-event" class="modal-overlay" hidden>
   <div class="modal-card">
-    <div class="modal-title">Add an event</div>
+    <div class="modal-title" id="add-event-modal-title">Add an event</div>
     <div class="auth-form">
       <select id="add-event-type">
         <option value="birthday">&#127874; Birthday</option>

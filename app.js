@@ -21,57 +21,171 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
+// Lightweight, code-level feature flags — no build step or backend needed to flip
+// one off. Add new entries here rather than scattering ad-hoc conditionals; each
+// flag should be checked at its call site the same way DEBUG_MODE is below, so
+// disabling a feature later never requires touching the logic itself.
+const FEATURE_FLAGS = {
+  // Raw numeric Health Score is intentionally hidden from users — the color
+  // shift IS the signal. Enable via ?debug=1 in the URL, or once, via
+  // localStorage.setItem('bloomDebug','1'), to see the underlying number.
+  debugMode: new URLSearchParams(location.search).has("debug") || localStorage.getItem("bloomDebug") === "1",
+};
+
 /* ---------------- Health engine ---------------- */
 
 const TYPE_POINTS = { message: 5, call: 12, video: 18 };
-const DECAY_PER_DAY = 2;
 const DAY_MS = 86400000;
+
+// Decay used to be one flat rate for every friend. It's now per-relationship,
+// keyed by each friend's own expected check-in cadence — a weekly friend goes
+// quiet "louder" than a quarterly one. DEFAULT_DECAY_PER_DAY is the fallback for
+// friends with no cadence set (all pre-existing friends, until edited), and
+// matches the old flat rate exactly so nobody's flower shifts on deploy.
+const CADENCE_META = {
+  weekly: { label: "Weekly", days: 7, decayPerDay: 3 },
+  biweekly: { label: "Every 2 weeks", days: 14, decayPerDay: 2 },
+  monthly: { label: "Monthly", days: 30, decayPerDay: 1 },
+  quarterly: { label: "Quarterly", days: 90, decayPerDay: 0.4 },
+};
+const DEFAULT_DECAY_PER_DAY = 2;
+function decayRateForFriend(friend) {
+  const meta = CADENCE_META[friend.checkInCadence];
+  return meta ? meta.decayPerDay : DEFAULT_DECAY_PER_DAY;
+}
+function cadenceLabel(friend) {
+  const meta = CADENCE_META[friend.checkInCadence];
+  return meta ? meta.label : "Not set";
+}
 
 function qualityMultiplier(q) { return 0.6 + (q - 1) * 0.2; }
 function pointsForContact(type, quality) {
   return Math.round(TYPE_POINTS[type] * qualityMultiplier(quality));
 }
-function currentHealth(friend) {
-  const now = Date.now();
-  const last = friend.lastEventAt || friend.createdAt || now;
-  const days = Math.max(0, (now - last) / DAY_MS);
-  const decayed = (friend.healthScore ?? 0) - DECAY_PER_DAY * days;
-  return Math.max(0, Math.min(100, Math.round(decayed)));
+function clampScore(n) { return Math.max(0, Math.min(100, n)); }
+function daysBetween(a, b) { return Math.max(0, (b - a) / DAY_MS); }
+
+// Health Score is computed from the friend's raw contact-event history on every
+// read, not stored as a mutable running total — so editing/deleting a past log
+// retroactively changes the score with no separate recalculation step. Each step
+// mirrors exactly what the old incremental (decay -> round -> clamp -> add points
+// -> clamp) update used to do, so friends with unedited history compute to the
+// same score they always have. Changing a friend's cadence recalculates their
+// whole history under the new rate, same principle — one current setting, not a
+// time-varying one.
+function currentHealth(friend, asOf = Date.now()) {
+  const decayPerDay = decayRateForFriend(friend);
+  const events = [...(friend.contacts || [])].sort((a, b) => a.timestamp - b.timestamp);
+  let score = 60;
+  let cursor = friend.createdAt ?? asOf;
+  for (const ev of events) {
+    const decayed = clampScore(Math.round(score - decayPerDay * daysBetween(cursor, ev.timestamp)));
+    score = clampScore(decayed + pointsForContact(ev.type, ev.quality));
+    cursor = ev.timestamp;
+  }
+  return clampScore(Math.round(score - decayPerDay * daysBetween(cursor, asOf)));
 }
-function stateForScore(score) {
-  if (score >= 80) return "blooming";
-  if (score >= 50) return "healthy";
-  if (score >= 25) return "wilting";
-  if (score >= 1) return "dying";
-  return "dormant";
+/* ---------------- Bloom tiers (customizable, Settings) ---------------- */
+
+// Approved vibrant-green-to-grey palette — the color shift is the primary
+// signal (no score shown by default), so each tier needs to read as clearly
+// distinct at a glance. Anyone who already saved a tier list to Firestore
+// keeps their own colors until they hit "Reset to defaults" in Settings.
+const DEFAULT_TIERS = [
+  { id: "dormant", tierName: "Dormant", minScore: 0, maxScore: 0, colorHex: "#9B9B9B" },
+  { id: "dying", tierName: "Dying", minScore: 1, maxScore: 24, colorHex: "#F26B3A" },
+  { id: "wilting", tierName: "Wilting", minScore: 25, maxScore: 49, colorHex: "#F2B705" },
+  { id: "healthy", tierName: "Healthy", minScore: 50, maxScore: 79, colorHex: "#A8D848" },
+  { id: "blooming", tierName: "Blooming", minScore: 80, maxScore: 100, colorHex: "#4CAF50" },
+];
+
+function getTiers() {
+  const tiers = rootData.tiers && rootData.tiers.length > 0 ? rootData.tiers : DEFAULT_TIERS;
+  return [...tiers].sort((a, b) => a.minScore - b.minScore);
 }
-const STATE_LABEL = {
-  blooming: "Blooming", healthy: "Healthy", wilting: "Wilting",
-  dying: "Dying", dormant: "Dormant",
-};
+function tierIndexForScore(score, tiers) {
+  const idx = tiers.findIndex((t) => score >= t.minScore && score <= t.maxScore);
+  return idx === -1 ? tiers.length - 1 : idx;
+}
+// The tier color is the signal, not a number — score only shows in debug mode.
+function tierStatusText(tierName, score) {
+  return FEATURE_FLAGS.debugMode ? `${tierName} — ${score}` : tierName;
+}
+function validateTiers(tiers) {
+  if (tiers.length === 0) return "You need at least one tier.";
+  const sorted = [...tiers].sort((a, b) => a.minScore - b.minScore);
+  if (sorted[0].minScore !== 0) return `"${sorted[0].tierName}" must start at 0.`;
+  if (sorted[sorted.length - 1].maxScore !== 100) return `"${sorted[sorted.length - 1].tierName}" must end at 100.`;
+  for (let i = 0; i < sorted.length; i++) {
+    const t = sorted[i];
+    if (!t.tierName.trim()) return "Every tier needs a name.";
+    if (!Number.isInteger(t.minScore) || !Number.isInteger(t.maxScore)) return `"${t.tierName}" needs whole-number bounds.`;
+    if (t.minScore > t.maxScore) return `"${t.tierName}"'s min is greater than its max.`;
+    if (i > 0 && t.minScore !== sorted[i - 1].maxScore + 1) {
+      return `Gap or overlap between "${sorted[i - 1].tierName}" and "${t.tierName}" — ranges must be contiguous.`;
+    }
+  }
+  return null;
+}
+
+/* ---------------- Color derivation (single tier color -> full palette) ---------------- */
+
+function hexToRgb(hex) {
+  const h = hex.replace("#", "");
+  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+  const n = parseInt(full, 16);
+  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+}
+function rgbToHex(r, g, b) {
+  const c = (v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0");
+  return `#${c(r)}${c(g)}${c(b)}`;
+}
+function tintHex(hex, amt) {
+  const { r, g, b } = hexToRgb(hex);
+  return rgbToHex(r + (255 - r) * amt, g + (255 - g) * amt, b + (255 - b) * amt);
+}
+function shadeHex(hex, amt) {
+  const { r, g, b } = hexToRgb(hex);
+  return rgbToHex(r * (1 - amt), g * (1 - amt), b * (1 - amt));
+}
+function tierPalette(tier) {
+  return {
+    bg: tintHex(tier.colorHex, 0.82),
+    petal: tier.colorHex,
+    center: shadeHex(tier.colorHex, 0.32),
+    ink: shadeHex(tier.colorHex, 0.32),
+  };
+}
 
 /* ---------------- Flower rendering ---------------- */
 
-const STATE_COLORS = {
-  blooming: { bg: "#EAF3E1", petal: "#9FC474", center: "#6f9a3f", ink: "#6f9a3f" },
-  healthy: { bg: "#F1F6EC", petal: "#B7CE93", center: "#7fa855", ink: "#7fa855" },
-  wilting: { bg: "#FBEFE0", petal: "#E3B579", center: "#c98f45", ink: "#c98f45" },
-  dying: { bg: "#F1EFEC", petal: "#BDB6AC", center: "#8f8880", ink: "#8f8880" },
-  dormant: { bg: "#ECEAE6", petal: "#C9C2B8", center: "#C9C2B8", ink: "#a49c8f" },
-};
+// Petal geometry is derived from a tier's RANK among all tiers (lowest score
+// range = bare stem, highest = full 5-petal bloom), not looked up by name, so
+// it generalizes to any user-defined tier list. When the list is untouched
+// (still exactly 5 tiers), these constants reproduce the original hand-tuned
+// look exactly rather than the generic formula's approximation.
+const DEFAULT_PETAL_CONFIGS = [
+  { count: 0, r: 0, opacity: [], fallen: 0, bare: true },
+  { count: 2, r: 8.5, opacity: [0.5, 0.3], fallen: 4 },
+  { count: 4, r: 9.5, opacity: [1, 1, 1, 0.4], fallen: 2 },
+  { count: 5, r: 10, opacity: [0.85, 0.85, 0.85, 0.85, 0.85], fallen: 0 },
+  { count: 5, r: 11, opacity: [1, 1, 1, 1, 1], fallen: 0 },
+];
+function petalConfigForRank(idx, n) {
+  if (n === 5) return DEFAULT_PETAL_CONFIGS[idx];
+  if (idx === 0) return { count: 0, r: 0, opacity: [], fallen: 0, bare: true };
+  const rank = n <= 1 ? 1 : idx / (n - 1);
+  const count = Math.max(2, Math.min(5, Math.round(2 + rank * 3)));
+  const baseOpacity = Math.min(1, 0.4 + rank * 0.6);
+  const opacity = Array(count).fill(baseOpacity);
+  if (rank < 1) opacity[count - 1] = Math.max(0.3, baseOpacity - 0.4);
+  return { count, r: 8 + rank * 3, opacity, fallen: Math.round((1 - rank) * 4) };
+}
 
-const STATE_PETALS = {
-  blooming: { count: 5, r: 11, opacity: [1, 1, 1, 1, 1], fallen: 0 },
-  healthy: { count: 5, r: 10, opacity: [0.85, 0.85, 0.85, 0.85, 0.85], fallen: 0 },
-  wilting: { count: 4, r: 9.5, opacity: [1, 1, 1, 0.4], fallen: 2 },
-  dying: { count: 2, r: 8.5, opacity: [0.5, 0.3], fallen: 4 },
-  dormant: { count: 0, r: 0, opacity: [], fallen: 0 },
-};
-
-function flowerSVG(state, cssSize) {
-  const colors = STATE_COLORS[state];
-  const cfg = STATE_PETALS[state];
-  const cx = 32, cy = 32, centerR = state === "dormant" ? 0 : Math.max(6, cfg.r * 0.8);
+function flowerSVG(tier, tierIdx, tierCount, cssSize) {
+  const colors = tierPalette(tier);
+  const cfg = petalConfigForRank(tierIdx, tierCount);
+  const cx = 32, cy = 32, centerR = cfg.bare ? 0 : Math.max(6, cfg.r * 0.8);
   let petals = "";
   for (let i = 0; i < cfg.count; i++) {
     const angle = (Math.PI * 2 * i) / cfg.count - Math.PI / 2;
@@ -79,11 +193,11 @@ function flowerSVG(state, cssSize) {
     const py = cy + 15 * Math.sin(angle);
     petals += `<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="${cfg.r}" fill="${colors.petal}" opacity="${cfg.opacity[i]}"/>`;
   }
-  const center = state === "dormant" ? "" :
+  const center = cfg.bare ? "" :
     `<circle cx="${cx}" cy="${cy}" r="${centerR}" fill="${colors.center}"/>`;
   let stem = "";
   let fallen = "";
-  if (state === "dormant") {
+  if (cfg.bare) {
     stem = `<path d="M32 22 C 30 40, 34 55, 32 74" stroke="${colors.petal}" stroke-width="3" fill="none" stroke-linecap="round" opacity=".7"/>`;
   } else if (cfg.fallen > 0) {
     const seeds = [[10, 62, 4], [30, 74, 3], [46, 66, 4], [38, 78, 3], [16, 72, 3]];
@@ -207,12 +321,36 @@ let modalQuality = null;
 let addNoteFriendId = null;
 let addEventFriendId = null;
 let currentFilter = "all";
+let groupByMode = "tags"; // "tags" | "cadence"
+let editingContactId = null;
+let editingNoteId = null;
+let editingEventId = null;
+
+/* ---------------- Array field helpers (contacts / notes / events CRUD) ---------------- */
+
+async function replaceArrayField(friendId, fieldName, newArray) {
+  const uid = auth.currentUser.uid;
+  await updateDoc(doc(db, "users", uid, "friends", friendId), { [fieldName]: newArray });
+}
+
+// One-time, idempotent self-heal: older contact entries were written before edit/delete
+// existed and have no id, so they can't be targeted individually. Backfill silently on
+// load; each friend only needs this once, after which the condition is always false.
+function backfillContactIds() {
+  for (const f of friends) {
+    const contacts = f.contacts || [];
+    if (contacts.length === 0 || contacts.every((c) => c.id)) continue;
+    const patched = contacts.map((c) => (c.id ? c : { ...c, id: crypto.randomUUID() }));
+    replaceArrayField(f.id, "contacts", patched);
+  }
+}
 
 /* ---------------- Router ---------------- */
 
 function parseHash() {
   const h = location.hash.replace(/^#\/?/, "");
   if (h.startsWith("friend/")) return { view: "friend", id: h.slice(7) };
+  if (h === "settings") return { view: "settings" };
   return { view: "dashboard" };
 }
 
@@ -228,6 +366,9 @@ function render() {
     currentFriendId = route.id;
     renderFriendDetail(route.id);
     showView("view-friend");
+  } else if (route.view === "settings") {
+    renderSettings();
+    showView("view-settings");
   } else {
     location.hash.startsWith("#/friend") && !friends.some((f) => f.id === route.id)
       ? (location.hash = "")
@@ -240,46 +381,158 @@ window.addEventListener("hashchange", render);
 
 /* ---------------- Dashboard ---------------- */
 
-function pickPrompt(excludeFriendId) {
-  const pool = excludeFriendId ? friends.filter((f) => f.id !== excludeFriendId) : friends;
-  const candidates = pool.length > 0 ? pool : friends;
-  if (candidates.length === 0) return null;
-  const withNotes = candidates.filter((f) => (f.notes || []).length > 0);
-  if (withNotes.length > 0) {
-    const f = withNotes[Math.floor(Math.random() * withNotes.length)];
+// Cancelling a friend's prompt repeatedly demotes them (not excludes them) from
+// selection, rather than a manual snooze: each cancel adds a penalty to their
+// effective rank, so genuinely-lower-scored friends win the slot instead. The
+// penalty clears the next time contact is actually logged with them.
+const PROMPT_CANCEL_PENALTY = 20;
+
+function promptText(f) {
+  if ((f.notes || []).length > 0) {
     const note = f.notes[Math.floor(Math.random() * f.notes.length)];
     const templates = {
       "☕": `Grab ${f.name} their usual — ${note.text}?`,
       "\u{1F382}": `${f.name}: ${note.text}. Worth planning something?`,
       "\u{1F97E}": `Ask ${f.name} about ${note.text.toLowerCase()}?`,
     };
-    return { date: todayKey(), friendId: f.id, text: templates[note.emoji] || `Reach out to ${f.name} — ${note.text}` };
+    return templates[note.emoji] || `Reach out to ${f.name} — ${note.text}`;
   }
-  const sorted = [...candidates].sort((a, b) => currentHealth(a) - currentHealth(b));
+  return `Ask ${f.name} what they're excited about this week.`;
+}
+function promptRank(f) {
+  return currentHealth(f) + (f.promptCancelCount || 0) * PROMPT_CANCEL_PENALTY;
+}
+function pickPrompt(excludeFriendId) {
+  const pool = excludeFriendId ? friends.filter((f) => f.id !== excludeFriendId) : friends;
+  const candidates = pool.length > 0 ? pool : friends;
+  if (candidates.length === 0) return null;
+  const sorted = [...candidates].sort((a, b) => {
+    const diff = promptRank(a) - promptRank(b);
+    return diff !== 0 ? diff : (a.promptLastShownAt || 0) - (b.promptLastShownAt || 0);
+  });
   const f = sorted[0];
-  return { date: todayKey(), friendId: f.id, text: `Ask ${f.name} what they're excited about this week.` };
+  return { date: todayKey(), friendId: f.id, text: promptText(f) };
+}
+function setDailyPrompt(prompt) {
+  const uid = auth.currentUser.uid;
+  rootData.dailyPrompt = prompt;
+  setDoc(doc(db, "users", uid), { dailyPrompt: prompt }, { merge: true });
+  if (prompt && prompt.friendId) {
+    updateDoc(doc(db, "users", uid, "friends", prompt.friendId), { promptLastShownAt: Date.now() });
+  }
 }
 
 function ensureDailyPrompt() {
   if (friends.length === 0) return null;
   if (rootData.dailyPrompt && rootData.dailyPrompt.date === todayKey()) {
+    if (rootData.dailyPrompt.friendId === null) return null; // cancelled today, no replacement
     return friends.some((f) => f.id === rootData.dailyPrompt.friendId) ? rootData.dailyPrompt : null;
   }
   const prompt = pickPrompt(null);
-  if (prompt) setDoc(doc(db, "users", auth.currentUser.uid), { dailyPrompt: prompt }, { merge: true });
+  if (prompt) setDailyPrompt(prompt);
   return prompt;
 }
 
 function refreshPromptIfLoggedToday(loggedFriendId) {
   if (!rootData.dailyPrompt || rootData.dailyPrompt.date !== todayKey()) return;
   if (rootData.dailyPrompt.friendId !== loggedFriendId) return;
-  const next = pickPrompt(loggedFriendId);
-  rootData.dailyPrompt = next;
-  setDoc(doc(db, "users", auth.currentUser.uid), { dailyPrompt: next }, { merge: true });
+  setDailyPrompt(pickPrompt(loggedFriendId));
+}
+
+function cancelDailyPrompt() {
+  const uid = auth.currentUser.uid;
+  const fid = rootData.dailyPrompt && rootData.dailyPrompt.friendId;
+  const f = fid && friends.find((x) => x.id === fid);
+  if (f) updateDoc(doc(db, "users", uid, "friends", fid), { promptCancelCount: (f.promptCancelCount || 0) + 1 });
+  rootData.dailyPrompt = { date: todayKey(), friendId: null };
+  setDoc(doc(db, "users", uid), { dailyPrompt: rootData.dailyPrompt }, { merge: true });
+  renderDashboard();
+}
+
+function changeDailyPrompt(newFriendId) {
+  const f = friends.find((x) => x.id === newFriendId);
+  if (!f) return;
+  setDailyPrompt({ date: todayKey(), friendId: f.id, text: promptText(f) });
+  document.getElementById("modal-change-prompt").hidden = true;
+  renderDashboard();
+}
+
+function openChangePromptModal(currentFriendIdForPrompt) {
+  const list = document.getElementById("change-prompt-list");
+  list.innerHTML = "";
+  const others = friends.filter((f) => f.id !== currentFriendIdForPrompt);
+  if (others.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "history-empty";
+    empty.textContent = "No other friends to switch to today.";
+    list.appendChild(empty);
+  }
+  for (const f of others) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "contact-type-row";
+    btn.textContent = f.name;
+    btn.onclick = () => changeDailyPrompt(f.id);
+    list.appendChild(btn);
+  }
+  document.getElementById("modal-change-prompt").hidden = false;
+}
+document.getElementById("change-prompt-close").onclick = () => { document.getElementById("modal-change-prompt").hidden = true; };
+
+function buildFriendCard(f, tiers) {
+  const score = currentHealth(f);
+  const tierIdx = tierIndexForScore(score, tiers);
+  const tier = tiers[tierIdx];
+  const colors = tierPalette(tier);
+  const card = document.createElement("button");
+  card.type = "button";
+  card.className = "friend-card";
+  card.style.background = colors.bg;
+  card.onclick = () => { location.hash = `#/friend/${f.id}`; };
+  card.innerHTML = `
+    ${flowerSVG(tier, tierIdx, tiers.length, 40)}
+    <div class="fc-name">${escapeHTML(f.name)}</div>
+    <div class="fc-status" style="color:${colors.ink}">${escapeHTML(tierStatusText(tier.tierName, score))}</div>
+    <div class="fc-category">${escapeHTML(categoryLabel(f.category || "friend"))}</div>
+    <div class="fc-log" style="color:${colors.ink};background:rgba(0,0,0,.05)">Log</div>
+  `;
+  card.querySelector(".fc-log").addEventListener("click", (e) => {
+    e.stopPropagation();
+    openLogModal(f.id);
+  });
+  return card;
+}
+
+function buildAddFriendTile(defaultCategory) {
+  const addTile = document.createElement("button");
+  addTile.type = "button";
+  addTile.className = "add-friend-tile";
+  addTile.innerHTML = `<div class="plus">+</div><div class="label">Add friend</div>`;
+  addTile.onclick = () => {
+    populateCategorySelect(document.getElementById("add-friend-category"), defaultCategory || "friend");
+    document.getElementById("add-friend-new-category").hidden = true;
+    document.getElementById("add-friend-new-category").value = "";
+    document.getElementById("add-friend-cadence").value = "";
+    document.getElementById("modal-add-friend").hidden = false;
+  };
+  return addTile;
+}
+
+function renderGroupByToggle() {
+  const wrap = document.getElementById("group-by-toggle");
+  wrap.innerHTML = "";
+  for (const mode of ["tags", "cadence"]) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = groupByMode === mode ? "active" : "";
+    btn.textContent = mode === "tags" ? "Tags" : "Cadence";
+    btn.onclick = () => { groupByMode = mode; renderDashboard(); };
+    wrap.appendChild(btn);
+  }
 }
 
 function renderDashboard() {
-  renderCategoryTabs();
+  renderGroupByToggle();
 
   const banner = document.getElementById("prompt-banner");
   const prompt = ensureDailyPrompt();
@@ -290,15 +543,33 @@ function renderDashboard() {
       location.hash = `#/friend/${prompt.friendId}`;
       openLogModal(prompt.friendId);
     };
+    document.getElementById("prompt-change").onclick = () => openChangePromptModal(prompt.friendId);
+    document.getElementById("prompt-cancel").onclick = cancelDailyPrompt;
   } else {
     banner.hidden = true;
   }
+
+  const tabs = document.getElementById("category-tabs");
+  const grid = document.getElementById("friend-grid");
+  const groups = document.getElementById("cadence-groups");
+
+  if (groupByMode === "cadence") {
+    tabs.hidden = true;
+    grid.hidden = true;
+    groups.hidden = false;
+    renderCadenceGroups();
+    return;
+  }
+
+  tabs.hidden = false;
+  grid.hidden = false;
+  groups.hidden = true;
+  renderCategoryTabs();
 
   const visible = currentFilter === "all"
     ? friends
     : friends.filter((f) => (f.category || "friend") === currentFilter);
 
-  const grid = document.getElementById("friend-grid");
   grid.className = "friend-grid" + (visible.length >= 5 ? " cols-3" : "");
   grid.innerHTML = "";
 
@@ -311,42 +582,112 @@ function renderDashboard() {
     grid.appendChild(empty);
   }
 
+  const tiers = getTiers();
   const sorted = [...visible].sort((a, b) => currentHealth(a) - currentHealth(b));
-  for (const f of sorted) {
-    const score = currentHealth(f);
-    const state = stateForScore(score);
-    const colors = STATE_COLORS[state];
-    const card = document.createElement("button");
-    card.type = "button";
-    card.className = "friend-card";
-    card.style.background = colors.bg;
-    card.onclick = () => { location.hash = `#/friend/${f.id}`; };
-    card.innerHTML = `
-      ${flowerSVG(state, 40)}
-      <div class="fc-name">${escapeHTML(f.name)}</div>
-      <div class="fc-status" style="color:${colors.ink}">${STATE_LABEL[state]} — ${score}</div>
-      <div class="fc-category">${escapeHTML(categoryLabel(f.category || "friend"))}</div>
-      <div class="fc-log" style="color:${colors.ink};background:${state === "blooming" || state === "healthy" ? `rgba(0,0,0,.05)` : "rgba(0,0,0,.05)"}">Log</div>
-    `;
-    card.querySelector(".fc-log").addEventListener("click", (e) => {
-      e.stopPropagation();
-      openLogModal(f.id);
-    });
-    grid.appendChild(card);
+  for (const f of sorted) grid.appendChild(buildFriendCard(f, tiers));
+  grid.appendChild(buildAddFriendTile(currentFilter !== "all" ? currentFilter : "friend"));
+}
+
+function renderCadenceGroups() {
+  const container = document.getElementById("cadence-groups");
+  container.innerHTML = "";
+
+  if (friends.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.textContent = "No friends planted yet — add your first one below.";
+    container.appendChild(empty);
+    container.appendChild(buildAddFriendTile("friend"));
+    return;
   }
 
-  const addTile = document.createElement("button");
-  addTile.type = "button";
-  addTile.className = "add-friend-tile";
-  addTile.innerHTML = `<div class="plus">+</div><div class="label">Add friend</div>`;
-  addTile.onclick = () => {
-    populateCategorySelect(document.getElementById("add-friend-category"), currentFilter !== "all" ? currentFilter : "friend");
-    document.getElementById("add-friend-new-category").hidden = true;
-    document.getElementById("add-friend-new-category").value = "";
-    document.getElementById("modal-add-friend").hidden = false;
-  };
-  grid.appendChild(addTile);
+  const tiers = getTiers();
+  const order = ["weekly", "biweekly", "monthly", "quarterly", null];
+  for (const key of order) {
+    const bucket = friends.filter((f) => (f.checkInCadence || null) === key);
+    if (bucket.length === 0) continue;
+    const section = document.createElement("div");
+    section.className = "cadence-section";
+    const title = document.createElement("div");
+    title.className = "cadence-section-title";
+    title.innerHTML = `${key ? CADENCE_META[key].label : "Not set"} <span class="cadence-section-count">— ${bucket.length}</span>`;
+    section.appendChild(title);
+    const sectionGrid = document.createElement("div");
+    sectionGrid.className = "friend-grid" + (bucket.length >= 5 ? " cols-3" : "");
+    const sorted = [...bucket].sort((a, b) => currentHealth(a) - currentHealth(b));
+    for (const f of sorted) sectionGrid.appendChild(buildFriendCard(f, tiers));
+    section.appendChild(sectionGrid);
+    container.appendChild(section);
+  }
+  container.appendChild(buildAddFriendTile("friend"));
 }
+
+/* ---------------- Settings (Bloom tiers) ---------------- */
+
+let draftTiers = null;
+
+function renderSettings() {
+  draftTiers = getTiers().map((t) => ({ ...t }));
+  document.getElementById("tiers-error").hidden = true;
+  renderTierRows();
+}
+
+function renderTierRows() {
+  const list = document.getElementById("tiers-list");
+  list.innerHTML = "";
+  const sorted = [...draftTiers].sort((a, b) => a.minScore - b.minScore);
+  for (const tier of sorted) {
+    const row = document.createElement("div");
+    row.className = "tier-row";
+    row.innerHTML = `
+      <input type="color" value="${tier.colorHex}" aria-label="Tier color" />
+      <input type="text" value="${escapeHTML(tier.tierName)}" aria-label="Tier name" />
+      <input type="number" value="${tier.minScore}" min="0" max="100" aria-label="Min score" />
+      <div class="tier-row-dash">–</div>
+      <input type="number" value="${tier.maxScore}" min="0" max="100" aria-label="Max score" />
+      <button type="button" class="icon-btn danger" title="Delete tier">\u{1F5D1}️</button>
+    `;
+    const [colorInput, nameInput, minInput, maxInput] = row.querySelectorAll("input");
+    const delBtn = row.querySelector("button");
+    colorInput.addEventListener("input", () => { tier.colorHex = colorInput.value; });
+    nameInput.addEventListener("input", () => { tier.tierName = nameInput.value; });
+    minInput.addEventListener("input", () => { tier.minScore = Number(minInput.value); });
+    maxInput.addEventListener("input", () => { tier.maxScore = Number(maxInput.value); });
+    delBtn.addEventListener("click", () => {
+      draftTiers = draftTiers.filter((t) => t.id !== tier.id);
+      renderTierRows();
+    });
+    list.appendChild(row);
+  }
+}
+
+document.getElementById("settings-btn").addEventListener("click", () => { location.hash = "#/settings"; });
+document.getElementById("back-to-garden-from-settings").addEventListener("click", () => { location.hash = ""; });
+
+document.getElementById("add-tier-btn").addEventListener("click", () => {
+  draftTiers.push({ id: crypto.randomUUID(), tierName: "New tier", minScore: 0, maxScore: 0, colorHex: "#88B04B" });
+  renderTierRows();
+});
+
+document.getElementById("reset-tiers-btn").addEventListener("click", () => {
+  draftTiers = DEFAULT_TIERS.map((t) => ({ ...t }));
+  renderTierRows();
+});
+
+document.getElementById("save-tiers-btn").addEventListener("click", async () => {
+  const errEl = document.getElementById("tiers-error");
+  const err = validateTiers(draftTiers);
+  if (err) {
+    errEl.textContent = err;
+    errEl.hidden = false;
+    return;
+  }
+  errEl.hidden = true;
+  const uid = auth.currentUser.uid;
+  await setDoc(doc(db, "users", uid), { tiers: draftTiers }, { merge: true });
+  toast("Tiers saved — your garden is updated \u{1F338}");
+  location.hash = "";
+});
 
 /* ---------------- Categories ---------------- */
 
@@ -432,15 +773,19 @@ function renderFriendDetail(id) {
   const f = friends.find((x) => x.id === id);
   if (!f) return;
   const score = currentHealth(f);
-  const state = stateForScore(score);
-  const colors = STATE_COLORS[state];
+  const tiers = getTiers();
+  const tierIdx = tierIndexForScore(score, tiers);
+  const tier = tiers[tierIdx];
+  const isLowestTier = tierIdx === 0;
+  const colors = tierPalette(tier);
 
   const header = document.getElementById("friend-header");
   header.style.background = colors.bg;
-  document.getElementById("friend-header-flower").innerHTML = flowerSVG(state, 64);
+  document.getElementById("friend-header-flower").innerHTML = flowerSVG(tier, tierIdx, tiers.length, 64);
   document.getElementById("friend-name").textContent = f.name;
-  document.getElementById("friend-status").textContent =
-    state === "dormant" ? "Dormant — ready when you are" : `${STATE_LABEL[state]} — health ${score}`;
+  document.getElementById("friend-status").textContent = isLowestTier
+    ? `${tier.tierName} — ready when you are`
+    : tierStatusText(tier.tierName, score);
   document.getElementById("friend-status").style.color = colors.ink;
 
   const catSelect = document.getElementById("friend-category-select");
@@ -451,8 +796,15 @@ function renderFriendDetail(id) {
     await updateDoc(doc(db, "users", uid, "friends", f.id), { category: catSelect.value });
   };
 
+  const cadenceSelect = document.getElementById("friend-cadence-select");
+  cadenceSelect.value = f.checkInCadence || "";
+  cadenceSelect.onchange = async () => {
+    const uid = auth.currentUser.uid;
+    await updateDoc(doc(db, "users", uid, "friends", f.id), { checkInCadence: cadenceSelect.value || null });
+  };
+
   const logBtn = document.getElementById("log-contact-btn");
-  logBtn.textContent = state === "dormant" ? "\u{1F331} Revive this friendship" : "+ Log contact";
+  logBtn.textContent = isLowestTier ? "\u{1F331} Revive this friendship" : "+ Log contact";
   logBtn.onclick = () => openLogModal(f.id);
 
   const locCard = document.getElementById("location-card");
@@ -468,7 +820,23 @@ function renderFriendDetail(id) {
   for (const n of f.notes || []) {
     const pill = document.createElement("div");
     pill.className = "note-pill";
-    pill.textContent = `${n.emoji} ${n.text}`;
+    pill.innerHTML = `<span>${n.emoji} ${escapeHTML(n.text)}</span>`;
+    const editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "icon-btn";
+    editBtn.title = "Edit note";
+    editBtn.textContent = "✏️";
+    editBtn.onclick = () => openEditNoteModal(f.id, n.id);
+    const delBtn = document.createElement("button");
+    delBtn.type = "button";
+    delBtn.className = "icon-btn danger";
+    delBtn.title = "Delete note";
+    delBtn.textContent = "\u{1F5D1}️";
+    delBtn.onclick = () => {
+      if (!confirm("Delete this note?")) return;
+      replaceArrayField(f.id, "notes", (f.notes || []).filter((x) => x.id !== n.id));
+    };
+    pill.append(editBtn, delBtn);
     notesRow.appendChild(pill);
   }
   const addNote = document.createElement("button");
@@ -477,6 +845,10 @@ function renderFriendDetail(id) {
   addNote.textContent = "+ Add note";
   addNote.onclick = () => {
     addNoteFriendId = f.id;
+    editingNoteId = null;
+    document.getElementById("add-note-modal-title").textContent = "Add a note";
+    document.getElementById("add-note-save").textContent = "Save note";
+    document.getElementById("add-note-emoji").value = "☕";
     document.getElementById("add-note-text").value = "";
     document.getElementById("modal-add-note").hidden = false;
   };
@@ -502,6 +874,8 @@ function renderFriendDetail(id) {
         <div class="event-row-date">${formatEventDate(ev)}</div>
       </div>
     `;
+    const actions = document.createElement("div");
+    actions.className = "row-actions";
     const exportBtn = document.createElement("button");
     exportBtn.type = "button";
     exportBtn.className = "event-export-btn";
@@ -510,12 +884,31 @@ function renderFriendDetail(id) {
       downloadICS(`${f.name}-${ev.type}.ics`, buildICS(f.name, ev));
       toast("Calendar file downloaded");
     };
-    row.appendChild(exportBtn);
+    const editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "icon-btn";
+    editBtn.title = "Edit event";
+    editBtn.textContent = "✏️";
+    editBtn.onclick = () => openEditEventModal(f.id, ev.id);
+    const delBtn = document.createElement("button");
+    delBtn.type = "button";
+    delBtn.className = "icon-btn danger";
+    delBtn.title = "Delete event";
+    delBtn.textContent = "\u{1F5D1}️";
+    delBtn.onclick = () => {
+      if (!confirm("Delete this event?")) return;
+      replaceArrayField(f.id, "events", (f.events || []).filter((x) => x.id !== ev.id));
+    };
+    actions.append(exportBtn, editBtn, delBtn);
+    row.appendChild(actions);
     eventsList.appendChild(row);
   }
 
   document.getElementById("add-event-btn").onclick = () => {
     addEventFriendId = f.id;
+    editingEventId = null;
+    document.getElementById("add-event-modal-title").textContent = "Add an event";
+    document.getElementById("add-event-save").textContent = "Save event";
     document.getElementById("add-event-type").value = "birthday";
     document.getElementById("add-event-label").value = "";
     document.getElementById("add-event-date").value = "";
@@ -536,7 +929,26 @@ function renderFriendDetail(id) {
     const row = document.createElement("div");
     row.className = "history-row";
     const meta = TYPE_META[c.type];
-    row.textContent = `${meta.icon} ${meta.label} — quality ${c.quality}/5 — ${relativeTime(c.timestamp)}`;
+    row.innerHTML = `<div class="history-row-text">${meta.icon} ${meta.label} — quality ${c.quality}/5 — ${relativeTime(c.timestamp)}</div>`;
+    const actions = document.createElement("div");
+    actions.className = "row-actions";
+    const editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "icon-btn";
+    editBtn.title = "Edit";
+    editBtn.textContent = "✏️";
+    editBtn.onclick = () => openEditContactModal(f.id, c.id);
+    const delBtn = document.createElement("button");
+    delBtn.type = "button";
+    delBtn.className = "icon-btn danger";
+    delBtn.title = "Delete";
+    delBtn.textContent = "\u{1F5D1}️";
+    delBtn.onclick = () => {
+      if (!confirm("Delete this contact log? This will recalculate the health score.")) return;
+      replaceArrayField(f.id, "contacts", (f.contacts || []).filter((x) => x.id !== c.id));
+    };
+    actions.append(editBtn, delBtn);
+    row.appendChild(actions);
     historyList.appendChild(row);
   }
 }
@@ -545,13 +957,31 @@ document.getElementById("back-to-garden").onclick = () => { location.hash = ""; 
 
 /* ---------------- Log contact modal ---------------- */
 
+function dateInputValue(ts) {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+function timestampFromDateInput(value) {
+  return new Date(`${value}T12:00:00`).getTime();
+}
+
+function selectContactType(type) {
+  modalType = type;
+  document.querySelectorAll("#modal-log-contact .contact-type-row").forEach((b) => {
+    b.classList.toggle("selected", b.dataset.type === type);
+  });
+  updateSaveEnabled();
+}
+
 function openLogModal(friendId) {
   const f = friends.find((x) => x.id === friendId);
   if (!f) return;
   currentFriendId = friendId;
+  editingContactId = null;
   modalType = null;
   modalQuality = null;
   document.getElementById("log-modal-title").textContent = `Log contact with ${f.name}`;
+  document.getElementById("log-save-btn").textContent = "Save";
 
   const reminder = document.getElementById("log-modal-reminder");
   if ((f.notes || []).length > 0) {
@@ -562,29 +992,43 @@ function openLogModal(friendId) {
   }
 
   document.querySelectorAll(".contact-type-row").forEach((btn) => btn.classList.remove("selected"));
-  buildCupRow();
+  buildCupRow(null);
+  document.getElementById("log-contact-date").value = dateInputValue(Date.now());
   document.getElementById("log-save-btn").disabled = true;
   document.getElementById("modal-log-contact").hidden = false;
 }
 
+function openEditContactModal(friendId, contactId) {
+  const f = friends.find((x) => x.id === friendId);
+  const c = f && (f.contacts || []).find((x) => x.id === contactId);
+  if (!f || !c) return;
+  currentFriendId = friendId;
+  editingContactId = contactId;
+  document.getElementById("log-modal-title").textContent = `Edit contact with ${f.name}`;
+  document.getElementById("log-save-btn").textContent = "Save changes";
+  document.getElementById("log-modal-reminder").hidden = true;
+
+  selectContactType(c.type);
+  buildCupRow(c.quality);
+  document.getElementById("log-contact-date").value = dateInputValue(c.timestamp);
+  document.getElementById("log-save-btn").disabled = false;
+  document.getElementById("modal-log-contact").hidden = false;
+}
+
 document.querySelectorAll(".contact-type-row").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    modalType = btn.dataset.type;
-    document.querySelectorAll(".contact-type-row").forEach((b) => b.classList.remove("selected"));
-    btn.classList.add("selected");
-    updateSaveEnabled();
-  });
+  btn.addEventListener("click", () => selectContactType(btn.dataset.type));
 });
 
-function buildCupRow() {
+function buildCupRow(preselectQuality) {
   const row = document.getElementById("cup-row");
   row.innerHTML = "";
+  modalQuality = preselectQuality || null;
   const fills = [10, 30, 60, 85, 100];
   fills.forEach((pct, i) => {
     const q = i + 1;
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "cup";
+    btn.className = "cup" + (q === preselectQuality ? " selected" : "");
     btn.dataset.quality = String(q);
     btn.innerHTML = `<div class="cup-glyph"><div class="cup-fill" style="height:${pct}%"></div></div><div class="cup-dot"></div>`;
     btn.addEventListener("click", () => {
@@ -603,16 +1047,27 @@ function updateSaveEnabled() {
 document.getElementById("log-save-btn").addEventListener("click", async () => {
   if (!modalType || !modalQuality || !currentFriendId) return;
   const f = friends.find((x) => x.id === currentFriendId);
-  const newHealth = Math.max(0, Math.min(100, currentHealth(f) + pointsForContact(modalType, modalQuality)));
-  const uid = auth.currentUser.uid;
-  await updateDoc(doc(db, "users", uid, "friends", currentFriendId), {
-    healthScore: newHealth,
-    lastEventAt: Date.now(),
-    contacts: arrayUnion({ type: modalType, quality: modalQuality, timestamp: Date.now() }),
-  });
+  const timestamp = timestampFromDateInput(document.getElementById("log-contact-date").value);
+
+  if (editingContactId) {
+    const updated = (f.contacts || []).map((c) =>
+      c.id === editingContactId ? { ...c, type: modalType, quality: modalQuality, timestamp } : c
+    );
+    await replaceArrayField(currentFriendId, "contacts", updated);
+    toast("Contact log updated — health score recalculated \u{1F331}");
+  } else {
+    await replaceArrayField(currentFriendId, "contacts", [
+      ...(f.contacts || []),
+      { id: crypto.randomUUID(), type: modalType, quality: modalQuality, timestamp },
+    ]);
+    toast(`Logged your ${TYPE_META[modalType].label.toLowerCase()} with ${f.name} \u{1F331}`);
+    if (f.promptCancelCount) {
+      await updateDoc(doc(db, "users", auth.currentUser.uid, "friends", currentFriendId), { promptCancelCount: 0 });
+    }
+    refreshPromptIfLoggedToday(currentFriendId);
+  }
+
   document.getElementById("modal-log-contact").hidden = true;
-  toast(`Logged your ${TYPE_META[modalType].label.toLowerCase()} with ${f.name} \u{1F331}`);
-  refreshPromptIfLoggedToday(currentFriendId);
   if (parseHash().view !== "friend") location.hash = `#/friend/${currentFriendId}`;
 });
 document.getElementById("log-modal-close").onclick = () => { document.getElementById("modal-log-contact").hidden = true; };
@@ -632,9 +1087,10 @@ document.getElementById("add-friend-save").addEventListener("click", async () =>
     const cat = await addCategory(newLabel);
     category = cat.id;
   }
+  const checkInCadence = document.getElementById("add-friend-cadence").value || null;
   const ref = await addDoc(collection(db, "users", uid, "friends"), {
-    name, location: location_ || null, category,
-    healthScore: 60, lastEventAt: Date.now(), createdAt: Date.now(),
+    name, location: location_ || null, category, checkInCadence,
+    createdAt: Date.now(),
     notes: [], contacts: [], events: [],
   });
   document.getElementById("add-friend-name").value = "";
@@ -646,20 +1102,52 @@ document.getElementById("add-friend-save").addEventListener("click", async () =>
 
 /* ---------------- Add note modal ---------------- */
 
+function openEditNoteModal(friendId, noteId) {
+  const f = friends.find((x) => x.id === friendId);
+  const n = f && (f.notes || []).find((x) => x.id === noteId);
+  if (!f || !n) return;
+  addNoteFriendId = friendId;
+  editingNoteId = noteId;
+  document.getElementById("add-note-modal-title").textContent = "Edit note";
+  document.getElementById("add-note-save").textContent = "Save changes";
+  document.getElementById("add-note-emoji").value = n.emoji;
+  document.getElementById("add-note-text").value = n.text;
+  document.getElementById("modal-add-note").hidden = false;
+}
+
 document.getElementById("add-note-close").onclick = () => { document.getElementById("modal-add-note").hidden = true; };
 document.getElementById("add-note-save").addEventListener("click", async () => {
   const text = document.getElementById("add-note-text").value.trim();
   const emoji = document.getElementById("add-note-emoji").value;
   if (!text || !addNoteFriendId) return;
-  const uid = auth.currentUser.uid;
-  await updateDoc(doc(db, "users", uid, "friends", addNoteFriendId), {
-    notes: arrayUnion({ id: crypto.randomUUID(), emoji, text }),
-  });
+  const f = friends.find((x) => x.id === addNoteFriendId);
+  if (editingNoteId) {
+    const updated = (f.notes || []).map((n) => (n.id === editingNoteId ? { ...n, emoji, text } : n));
+    await replaceArrayField(addNoteFriendId, "notes", updated);
+    toast("Note updated");
+  } else {
+    await replaceArrayField(addNoteFriendId, "notes", [...(f.notes || []), { id: crypto.randomUUID(), emoji, text }]);
+    toast("Note saved");
+  }
   document.getElementById("modal-add-note").hidden = true;
-  toast("Note saved");
 });
 
 /* ---------------- Add event modal ---------------- */
+
+function openEditEventModal(friendId, eventId) {
+  const f = friends.find((x) => x.id === friendId);
+  const ev = f && (f.events || []).find((x) => x.id === eventId);
+  if (!f || !ev) return;
+  addEventFriendId = friendId;
+  editingEventId = eventId;
+  document.getElementById("add-event-modal-title").textContent = "Edit event";
+  document.getElementById("add-event-save").textContent = "Save changes";
+  document.getElementById("add-event-type").value = ev.type;
+  document.getElementById("add-event-label").value = ev.label || "";
+  document.getElementById("add-event-date").value = ev.date;
+  document.getElementById("add-event-recurring").checked = ev.recurring;
+  document.getElementById("modal-add-event").hidden = false;
+}
 
 document.getElementById("add-event-close").onclick = () => { document.getElementById("modal-add-event").hidden = true; };
 document.getElementById("add-event-type").addEventListener("change", (e) => {
@@ -672,12 +1160,21 @@ document.getElementById("add-event-save").addEventListener("click", async () => 
   const date = document.getElementById("add-event-date").value;
   const recurring = document.getElementById("add-event-recurring").checked;
   if (!date || !addEventFriendId) return;
-  const uid = auth.currentUser.uid;
-  await updateDoc(doc(db, "users", uid, "friends", addEventFriendId), {
-    events: arrayUnion({ id: crypto.randomUUID(), type, label: label || null, date, recurring }),
-  });
+  const f = friends.find((x) => x.id === addEventFriendId);
+  if (editingEventId) {
+    const updated = (f.events || []).map((ev) =>
+      ev.id === editingEventId ? { ...ev, type, label: label || null, date, recurring } : ev
+    );
+    await replaceArrayField(addEventFriendId, "events", updated);
+    toast("Event updated");
+  } else {
+    await replaceArrayField(addEventFriendId, "events", [
+      ...(f.events || []),
+      { id: crypto.randomUUID(), type, label: label || null, date, recurring },
+    ]);
+    toast("Event saved");
+  }
   document.getElementById("modal-add-event").hidden = true;
-  toast("Event saved");
 });
 
 /* ---------------- Auth ---------------- */
@@ -777,6 +1274,7 @@ onAuthStateChanged(auth, (user) => {
   unsubFriends = onSnapshot(collection(db, "users", uid, "friends"), (snap) => {
     friends = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     render();
+    backfillContactIds();
   });
 });
 
