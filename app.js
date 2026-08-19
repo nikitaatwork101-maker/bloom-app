@@ -37,25 +37,65 @@ const FEATURE_FLAGS = {
 const TYPE_POINTS = { message: 5, call: 12, video: 18 };
 const DAY_MS = 86400000;
 
-// Decay used to be one flat rate for every friend. It's now per-relationship,
-// keyed by each friend's own expected check-in cadence — a weekly friend goes
-// quiet "louder" than a quarterly one. DEFAULT_DECAY_PER_DAY is the fallback for
-// friends with no cadence set (all pre-existing friends, until edited), and
-// matches the old flat rate exactly so nobody's flower shifts on deploy.
+// Decay is per-relationship, keyed by each Bloom's own cadence — a daily Bloom
+// goes quiet "louder" than a custom-90-day one. Design doc §12.1 shape:
+// Bloom.cadence = { type: "daily"|"weekly"|"biweekly"|"custom", customDays }.
+// This replaced the earlier checkInCadence (flat string, weekly/biweekly/
+// monthly/quarterly) entirely rather than extending it — no field with that
+// exact shape existed before. Nothing is migrated in Firestore: old Blooms
+// keep whatever they had. Two separate concerns, deliberately not merged:
+// decayRateForFriend() preserves each legacy cadence's EXACT original rate
+// (monthly/quarterly kept their old fixed numbers, not the new 21/days
+// formula, which would have quietly changed already-set Blooms' decay);
+// normalizedCadence()/cadenceLabel() translate legacy values into the new
+// shape only for UI display and editing, never for scoring.
 const CADENCE_META = {
-  weekly: { label: "Weekly", days: 7, decayPerDay: 3 },
-  biweekly: { label: "Every 2 weeks", days: 14, decayPerDay: 2 },
-  monthly: { label: "Monthly", days: 30, decayPerDay: 1 },
-  quarterly: { label: "Quarterly", days: 90, decayPerDay: 0.4 },
+  daily: { label: "Daily", decayPerDay: 5 },
+  weekly: { label: "Weekly", decayPerDay: 3 },
+  biweekly: { label: "Every 2 weeks", decayPerDay: 2 },
 };
 const DEFAULT_DECAY_PER_DAY = 2;
+const LEGACY_CADENCE_DECAY = { weekly: 3, biweekly: 2, monthly: 1, quarterly: 0.4 };
+const LEGACY_CADENCE_LABEL = { weekly: "Weekly", biweekly: "Every 2 weeks", monthly: "Monthly", quarterly: "Quarterly" };
+const LEGACY_CADENCE_DISPLAY_SHAPE = {
+  weekly: { type: "weekly", customDays: null },
+  biweekly: { type: "biweekly", customDays: null },
+  monthly: { type: "custom", customDays: 30 },
+  quarterly: { type: "custom", customDays: 90 },
+};
+
 function decayRateForFriend(friend) {
-  const meta = CADENCE_META[friend.checkInCadence];
-  return meta ? meta.decayPerDay : DEFAULT_DECAY_PER_DAY;
+  if (friend.cadence && friend.cadence.type) {
+    if (friend.cadence.type === "custom") {
+      const days = friend.cadence.customDays > 0 ? friend.cadence.customDays : 30;
+      return 21 / days;
+    }
+    const meta = CADENCE_META[friend.cadence.type];
+    return meta ? meta.decayPerDay : DEFAULT_DECAY_PER_DAY;
+  }
+  if (friend.checkInCadence && LEGACY_CADENCE_DECAY[friend.checkInCadence] != null) {
+    return LEGACY_CADENCE_DECAY[friend.checkInCadence];
+  }
+  return DEFAULT_DECAY_PER_DAY;
+}
+
+// Display-only: for the UI, translate whatever's on the Bloom into the new
+// { type, customDays } shape so the dropdown can pre-select something sensible.
+function normalizedCadence(friend) {
+  if (friend.cadence && friend.cadence.type) return friend.cadence;
+  if (friend.checkInCadence && LEGACY_CADENCE_DISPLAY_SHAPE[friend.checkInCadence]) {
+    return LEGACY_CADENCE_DISPLAY_SHAPE[friend.checkInCadence];
+  }
+  return null;
 }
 function cadenceLabel(friend) {
-  const meta = CADENCE_META[friend.checkInCadence];
-  return meta ? meta.label : "Not set";
+  if (!friend.cadence && friend.checkInCadence && LEGACY_CADENCE_LABEL[friend.checkInCadence]) {
+    return LEGACY_CADENCE_LABEL[friend.checkInCadence];
+  }
+  const cadence = normalizedCadence(friend);
+  if (!cadence) return "Not set";
+  if (cadence.type === "custom") return cadence.customDays ? `Every ${cadence.customDays} days` : "Custom";
+  return CADENCE_META[cadence.type]?.label || "Not set";
 }
 
 function qualityMultiplier(q) { return 0.6 + (q - 1) * 0.2; }
@@ -464,7 +504,7 @@ function openChangePromptModal(currentFriendIdForPrompt) {
   if (others.length === 0) {
     const empty = document.createElement("div");
     empty.className = "history-empty";
-    empty.textContent = "No other friends to switch to today.";
+    empty.textContent = "No other Blooms to switch to today.";
     list.appendChild(empty);
   }
   for (const f of others) {
@@ -507,15 +547,26 @@ function buildAddFriendTile(defaultCategory) {
   const addTile = document.createElement("button");
   addTile.type = "button";
   addTile.className = "add-friend-tile";
-  addTile.innerHTML = `<div class="plus">+</div><div class="label">Add friend</div>`;
+  addTile.innerHTML = `<div class="plus">+</div><div class="label">Add Bloom</div>`;
   addTile.onclick = () => {
     populateCategorySelect(document.getElementById("add-friend-category"), defaultCategory || "friend");
     document.getElementById("add-friend-new-category").hidden = true;
     document.getElementById("add-friend-new-category").value = "";
-    document.getElementById("add-friend-cadence").value = "";
+    document.getElementById("add-friend-cadence").value = "weekly";
+    document.getElementById("add-friend-cadence-custom-days").hidden = true;
+    document.getElementById("add-friend-cadence-custom-days").value = "";
     document.getElementById("modal-add-friend").hidden = false;
   };
   return addTile;
+}
+
+function cadenceObjectFromInputs(typeSelect, customDaysInput) {
+  const type = typeSelect.value;
+  if (type === "custom") {
+    const days = parseInt(customDaysInput.value, 10);
+    return { type: "custom", customDays: days > 0 ? days : 30 };
+  }
+  return { type, customDays: null };
 }
 
 function renderGroupByToggle() {
@@ -577,7 +628,7 @@ function renderDashboard() {
     const empty = document.createElement("div");
     empty.className = "empty-state";
     empty.textContent = friends.length === 0
-      ? "No friends planted yet — add your first one below."
+      ? "No Blooms planted yet — add your first one below."
       : "No one in this tab yet.";
     grid.appendChild(empty);
   }
@@ -595,22 +646,26 @@ function renderCadenceGroups() {
   if (friends.length === 0) {
     const empty = document.createElement("div");
     empty.className = "empty-state";
-    empty.textContent = "No friends planted yet — add your first one below.";
+    empty.textContent = "No Blooms planted yet — add your first one below.";
     container.appendChild(empty);
     container.appendChild(buildAddFriendTile("friend"));
     return;
   }
 
   const tiers = getTiers();
-  const order = ["weekly", "biweekly", "monthly", "quarterly", null];
+  const order = ["daily", "weekly", "biweekly", "custom", null];
+  const orderLabel = { daily: "Daily", weekly: "Weekly", biweekly: "Every 2 weeks", custom: "Custom", null: "Not set" };
   for (const key of order) {
-    const bucket = friends.filter((f) => (f.checkInCadence || null) === key);
+    const bucket = friends.filter((f) => {
+      const cadence = normalizedCadence(f);
+      return (cadence ? cadence.type : null) === key;
+    });
     if (bucket.length === 0) continue;
     const section = document.createElement("div");
     section.className = "cadence-section";
     const title = document.createElement("div");
     title.className = "cadence-section-title";
-    title.innerHTML = `${key ? CADENCE_META[key].label : "Not set"} <span class="cadence-section-count">— ${bucket.length}</span>`;
+    title.innerHTML = `${orderLabel[key]} <span class="cadence-section-count">— ${bucket.length}</span>`;
     section.appendChild(title);
     const sectionGrid = document.createElement("div");
     sectionGrid.className = "friend-grid" + (bucket.length >= 5 ? " cols-3" : "");
@@ -622,11 +677,40 @@ function renderCadenceGroups() {
   container.appendChild(buildAddFriendTile("friend"));
 }
 
+/* ---------------- Settings: profile (location/timezone) ---------------- */
+
+function browserTimezone() {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch { return ""; }
+}
+
+function renderProfileFields() {
+  const loc = rootData.location || {};
+  document.getElementById("profile-city").value = loc.city || "";
+  document.getElementById("profile-timezone").value = loc.timezone || browserTimezone();
+  document.getElementById("profile-error").hidden = true;
+}
+
+document.getElementById("save-profile-btn").addEventListener("click", async () => {
+  const city = document.getElementById("profile-city").value.trim();
+  const timezone = document.getElementById("profile-timezone").value.trim();
+  const errEl = document.getElementById("profile-error");
+  if (!city || !timezone) {
+    errEl.textContent = "Both city and timezone are needed for same-city prompts and reminder timing.";
+    errEl.hidden = false;
+    return;
+  }
+  errEl.hidden = true;
+  const uid = auth.currentUser.uid;
+  await setDoc(doc(db, "users", uid), { location: { city, timezone } }, { merge: true });
+  toast("Profile saved");
+});
+
 /* ---------------- Settings (Bloom tiers) ---------------- */
 
 let draftTiers = null;
 
 function renderSettings() {
+  renderProfileFields();
   draftTiers = getTiers().map((t) => ({ ...t }));
   document.getElementById("tiers-error").hidden = true;
   renderTierRows();
@@ -761,6 +845,10 @@ document.getElementById("add-friend-category").addEventListener("change", (e) =>
   document.getElementById("add-friend-new-category").hidden = e.target.value !== "__new__";
 });
 
+document.getElementById("add-friend-cadence").addEventListener("change", (e) => {
+  document.getElementById("add-friend-cadence-custom-days").hidden = e.target.value !== "custom";
+});
+
 function escapeHTML(s) {
   const d = document.createElement("div");
   d.textContent = s;
@@ -797,23 +885,44 @@ function renderFriendDetail(id) {
   };
 
   const cadenceSelect = document.getElementById("friend-cadence-select");
-  cadenceSelect.value = f.checkInCadence || "";
+  const customDaysInput = document.getElementById("friend-cadence-custom-days");
+  const shownCadence = normalizedCadence(f);
+  cadenceSelect.value = shownCadence ? shownCadence.type : "";
+  customDaysInput.hidden = !shownCadence || shownCadence.type !== "custom";
+  customDaysInput.value = shownCadence && shownCadence.type === "custom" ? shownCadence.customDays : "";
   cadenceSelect.onchange = async () => {
+    customDaysInput.hidden = cadenceSelect.value !== "custom";
+    if (!cadenceSelect.value) {
+      const uid = auth.currentUser.uid;
+      await updateDoc(doc(db, "users", uid, "friends", f.id), { cadence: null, checkInCadence: null });
+      return;
+    }
+    if (cadenceSelect.value === "custom" && !customDaysInput.value) return; // wait for a day count
     const uid = auth.currentUser.uid;
-    await updateDoc(doc(db, "users", uid, "friends", f.id), { checkInCadence: cadenceSelect.value || null });
+    await updateDoc(doc(db, "users", uid, "friends", f.id), {
+      cadence: cadenceObjectFromInputs(cadenceSelect, customDaysInput),
+      checkInCadence: null,
+    });
+  };
+  customDaysInput.onchange = async () => {
+    if (cadenceSelect.value !== "custom" || !customDaysInput.value) return;
+    const uid = auth.currentUser.uid;
+    await updateDoc(doc(db, "users", uid, "friends", f.id), {
+      cadence: cadenceObjectFromInputs(cadenceSelect, customDaysInput),
+      checkInCadence: null,
+    });
+  };
+
+  const cityInput = document.getElementById("friend-city-input");
+  cityInput.value = f.city || "";
+  cityInput.onchange = async () => {
+    const uid = auth.currentUser.uid;
+    await updateDoc(doc(db, "users", uid, "friends", f.id), { city: cityInput.value.trim() || null });
   };
 
   const logBtn = document.getElementById("log-contact-btn");
-  logBtn.textContent = isLowestTier ? "\u{1F331} Revive this friendship" : "+ Log contact";
+  logBtn.textContent = isLowestTier ? "\u{1F331} Revive this Bloom" : "+ Log contact";
   logBtn.onclick = () => openLogModal(f.id);
-
-  const locCard = document.getElementById("location-card");
-  if (f.location) {
-    locCard.hidden = false;
-    locCard.textContent = `\u{1F4CD} ${f.location} — reminders are timed to your overlap hours`;
-  } else {
-    locCard.hidden = true;
-  }
 
   const notesRow = document.getElementById("notes-row");
   notesRow.innerHTML = "";
@@ -1077,7 +1186,6 @@ document.getElementById("log-modal-close").onclick = () => { document.getElement
 document.getElementById("add-friend-close").onclick = () => { document.getElementById("modal-add-friend").hidden = true; };
 document.getElementById("add-friend-save").addEventListener("click", async () => {
   const name = document.getElementById("add-friend-name").value.trim();
-  const location_ = document.getElementById("add-friend-location").value.trim();
   if (!name) return;
   const uid = auth.currentUser.uid;
   let category = document.getElementById("add-friend-category").value;
@@ -1087,16 +1195,20 @@ document.getElementById("add-friend-save").addEventListener("click", async () =>
     const cat = await addCategory(newLabel);
     category = cat.id;
   }
-  const checkInCadence = document.getElementById("add-friend-cadence").value || null;
+  const cadence = cadenceObjectFromInputs(
+    document.getElementById("add-friend-cadence"),
+    document.getElementById("add-friend-cadence-custom-days")
+  );
+  const city = document.getElementById("add-friend-city").value.trim() || null;
   const ref = await addDoc(collection(db, "users", uid, "friends"), {
-    name, location: location_ || null, category, checkInCadence,
+    name, category, cadence, city,
     createdAt: Date.now(),
     notes: [], contacts: [], events: [],
   });
   document.getElementById("add-friend-name").value = "";
-  document.getElementById("add-friend-location").value = "";
+  document.getElementById("add-friend-city").value = "";
   document.getElementById("modal-add-friend").hidden = true;
-  toast(`Planted a new friendship with ${name} \u{1F33F}`);
+  toast(`Planted a new Bloom for ${name} \u{1F33F}`);
   location.hash = `#/friend/${ref.id}`;
 });
 

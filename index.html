@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Bloom</title>
-<meta name="description" content="See which friendships need a little water." />
+<meta name="description" content="See which Blooms need a little water." />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -35,7 +35,7 @@
           <circle cx="22" cy="22" r="6.5" fill="#6f9a3f"/>
         </svg>
         <div class="wordmark">Bloom</div>
-        <div class="subhead">See which friendships need a little water</div>
+        <div class="subhead">See which Blooms need a little water</div>
       </div>
       <form id="signin-form" class="auth-form">
         <input type="email" id="signin-email" placeholder="Email" autocomplete="email" required />
@@ -102,16 +102,20 @@
             <select id="friend-category-select" class="category-select"></select>
             <select id="friend-cadence-select" class="category-select">
               <option value="">Check-in cadence: not set</option>
+              <option value="daily">Daily</option>
               <option value="weekly">Weekly</option>
               <option value="biweekly">Every 2 weeks</option>
-              <option value="monthly">Monthly</option>
-              <option value="quarterly">Quarterly</option>
+              <option value="custom">Custom</option>
             </select>
+            <input type="number" id="friend-cadence-custom-days" class="category-select" placeholder="Every how many days?" min="1" hidden />
+            <div class="field-with-info">
+              <input type="text" id="friend-city-input" class="category-select" placeholder="City" />
+              <button type="button" class="icon-btn city-info-btn" title="Used to time prompts and notifications around this Bloom's day, and to suggest in-person vs. remote actions when you're in the same city." aria-label="Why we ask for city">&#9432;</button>
+            </div>
           </div>
           <div class="friend-actions">
             <button class="btn-primary" id="log-contact-btn">+ Log contact</button>
           </div>
-          <div class="location-card" id="location-card" hidden></div>
           <div class="notes-row" id="notes-row"></div>
         </div>
       </div>
@@ -135,6 +139,26 @@
   <section id="view-settings" class="view">
     <div class="page">
       <button class="back-link" id="back-to-garden-from-settings">&larr; Back to garden</button>
+
+      <div class="dash-title">Your profile</div>
+      <div class="settings-hint">Your city and timezone power same-city prompts and keep reminders inside your waking hours.</div>
+      <div class="profile-fields">
+        <label class="date-field">
+          <span>Your city</span>
+          <input type="text" id="profile-city" placeholder="e.g. Austin" />
+        </label>
+        <label class="date-field">
+          <span>Timezone</span>
+          <input type="text" id="profile-timezone" placeholder="e.g. America/Chicago" />
+        </label>
+      </div>
+      <p id="profile-error" class="form-error" hidden></p>
+      <div class="settings-actions">
+        <button type="button" class="btn-primary" id="save-profile-btn">Save profile</button>
+      </div>
+
+      <div class="settings-divider"></div>
+
       <div class="dash-title">Bloom tiers</div>
       <div class="settings-hint">Each tier needs a score range (0–100, no gaps or overlaps) and a color — the rest of the flower's look is derived automatically.</div>
       <div id="tiers-list" class="tiers-list"></div>
@@ -185,21 +209,24 @@
 <!-- Add friend modal -->
 <div id="modal-add-friend" class="modal-overlay" hidden>
   <div class="modal-card">
-    <div class="modal-title">Add a friend</div>
+    <div class="modal-title">Add a Bloom</div>
     <div class="auth-form">
       <input type="text" id="add-friend-name" placeholder="Name" required />
-      <input type="text" id="add-friend-location" placeholder="City, Country (optional)" />
+      <div class="field-with-info">
+        <input type="text" id="add-friend-city" placeholder="City (optional)" />
+        <button type="button" class="icon-btn city-info-btn" title="Used to time prompts and notifications around this Bloom's day, and to suggest in-person vs. remote actions when you're in the same city." aria-label="Why we ask for city">&#9432;</button>
+      </div>
       <select id="add-friend-category"></select>
       <input type="text" id="add-friend-new-category" placeholder="New tab name" hidden />
       <select id="add-friend-cadence">
-        <option value="">Check-in cadence: not set</option>
-        <option value="weekly">Weekly</option>
+        <option value="daily">Daily</option>
+        <option value="weekly" selected>Weekly</option>
         <option value="biweekly">Every 2 weeks</option>
-        <option value="monthly">Monthly</option>
-        <option value="quarterly">Quarterly</option>
+        <option value="custom">Custom</option>
       </select>
+      <input type="number" id="add-friend-cadence-custom-days" placeholder="Every how many days?" min="1" hidden />
     </div>
-    <button type="button" class="btn-primary btn-block" id="add-friend-save">Plant this friendship</button>
+    <button type="button" class="btn-primary btn-block" id="add-friend-save">Plant this Bloom</button>
     <button type="button" class="modal-close" id="add-friend-close" aria-label="Close">&times;</button>
   </div>
 </div>
