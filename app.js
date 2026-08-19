@@ -222,8 +222,11 @@ function petalConfigForRank(idx, n) {
   return { count, r: 8 + rank * 3, opacity, fallen: Math.round((1 - rank) * 4) };
 }
 
-function flowerSVG(tier, tierIdx, tierCount, cssSize) {
-  const colors = tierPalette(tier);
+// Shape (petal count/opacity/bare-stem) and color are deliberately decoupled:
+// tier rank always drives shape, but the caller decides what palette to paint
+// it with — friend-detail keeps tier color (unchanged), the dashboard grid
+// uses tag color instead (design doc §12.4).
+function flowerSVG(colors, tierIdx, tierCount, cssSize) {
   const cfg = petalConfigForRank(tierIdx, tierCount);
   const cx = 32, cy = 32, centerR = cfg.bare ? 0 : Math.max(6, cfg.r * 0.8);
   let petals = "";
@@ -427,6 +430,16 @@ window.addEventListener("hashchange", render);
 // penalty clears the next time contact is actually logged with them.
 const PROMPT_CANCEL_PENALTY = 20;
 
+// Design doc §12.3: branch the prompt's suggested action on same-city vs.
+// long-distance. A blank Bloom.city defaults to long-distance (doc's explicit
+// "safer assumption than guessing same-city"). Case/whitespace-insensitive
+// compare, since both fields are free-typed manual entry.
+function isSameCity(friend) {
+  const userCity = rootData.location && rootData.location.city;
+  if (!userCity || !friend.city) return false;
+  return userCity.trim().toLowerCase() === friend.city.trim().toLowerCase();
+}
+
 function promptText(f) {
   if ((f.notes || []).length > 0) {
     const note = f.notes[Math.floor(Math.random() * f.notes.length)];
@@ -437,7 +450,9 @@ function promptText(f) {
     };
     return templates[note.emoji] || `Reach out to ${f.name} — ${note.text}`;
   }
-  return `Ask ${f.name} what they're excited about this week.`;
+  return isSameCity(f)
+    ? `See ${f.name} in person this week?`
+    : `Call or text ${f.name} — or start planning your next visit?`;
 }
 function promptRank(f) {
   return currentHealth(f) + (f.promptCancelCount || 0) * PROMPT_CANCEL_PENALTY;
@@ -477,6 +492,16 @@ function refreshPromptIfLoggedToday(loggedFriendId) {
   if (!rootData.dailyPrompt || rootData.dailyPrompt.date !== todayKey()) return;
   if (rootData.dailyPrompt.friendId !== loggedFriendId) return;
   setDailyPrompt(pickPrompt(loggedFriendId));
+}
+
+// Design doc §12.3: "re-evaluates whenever a Bloom's city is edited." Unlike
+// refreshPromptIfLoggedToday, this keeps the same Bloom as today's subject —
+// only the copy (same-city vs. long-distance variant) needs to change, not
+// who's featured.
+function refreshPromptTextIfCityEdited(editedFriend) {
+  if (!rootData.dailyPrompt || rootData.dailyPrompt.date !== todayKey()) return;
+  if (rootData.dailyPrompt.friendId !== editedFriend.id) return;
+  setDailyPrompt({ ...rootData.dailyPrompt, text: promptText(editedFriend) });
 }
 
 function cancelDailyPrompt() {
@@ -523,18 +548,19 @@ function buildFriendCard(f, tiers) {
   const score = currentHealth(f);
   const tierIdx = tierIndexForScore(score, tiers);
   const tier = tiers[tierIdx];
-  const colors = tierPalette(tier);
+  const tierColors = tierPalette(tier); // health signal: status text only
+  const tagColors = primaryTagPalette(f); // relationship signal: card + flower (§12.4)
   const card = document.createElement("button");
   card.type = "button";
   card.className = "friend-card";
-  card.style.background = colors.bg;
+  card.style.background = tagColors.bg;
   card.onclick = () => { location.hash = `#/friend/${f.id}`; };
   card.innerHTML = `
-    ${flowerSVG(tier, tierIdx, tiers.length, 40)}
+    ${flowerSVG(tagColors, tierIdx, tiers.length, 40)}
     <div class="fc-name">${escapeHTML(f.name)}</div>
-    <div class="fc-status" style="color:${colors.ink}">${escapeHTML(tierStatusText(tier.tierName, score))}</div>
-    <div class="fc-category">${escapeHTML(categoryLabel(f.category || "friend"))}</div>
-    <div class="fc-log" style="color:${colors.ink};background:rgba(0,0,0,.05)">Log</div>
+    <div class="fc-status" style="color:${tierColors.ink}">${escapeHTML(tierStatusText(tier.tierName, score))}</div>
+    <div class="fc-category">${escapeHTML(normalizedTags(f).map(categoryLabel).join(", "))}</div>
+    <div class="fc-log" style="color:${tierColors.ink};background:rgba(0,0,0,.05)">Log</div>
   `;
   card.querySelector(".fc-log").addEventListener("click", (e) => {
     e.stopPropagation();
@@ -543,15 +569,25 @@ function buildFriendCard(f, tiers) {
   return card;
 }
 
+let addFriendSelectedTags = new Set();
+
 function buildAddFriendTile(defaultCategory) {
   const addTile = document.createElement("button");
   addTile.type = "button";
   addTile.className = "add-friend-tile";
   addTile.innerHTML = `<div class="plus">+</div><div class="label">Add Bloom</div>`;
   addTile.onclick = () => {
-    populateCategorySelect(document.getElementById("add-friend-category"), defaultCategory || "friend");
-    document.getElementById("add-friend-new-category").hidden = true;
-    document.getElementById("add-friend-new-category").value = "";
+    addFriendSelectedTags = new Set([defaultCategory || "friend"]);
+    const picker = document.getElementById("add-friend-tag-picker");
+    renderTagPicker(picker, addFriendSelectedTags, () => {});
+    document.getElementById("add-friend-new-tag-btn").onclick = () => {
+      addCategoryOnCreate = (cat) => {
+        addFriendSelectedTags.add(cat.id);
+        renderTagPicker(picker, addFriendSelectedTags, () => {});
+      };
+      document.getElementById("add-category-name").value = "";
+      document.getElementById("modal-add-category").hidden = false;
+    };
     document.getElementById("add-friend-cadence").value = "weekly";
     document.getElementById("add-friend-cadence-custom-days").hidden = true;
     document.getElementById("add-friend-cadence-custom-days").value = "";
@@ -582,8 +618,20 @@ function renderGroupByToggle() {
   }
 }
 
+function renderTagLegend() {
+  const legend = document.getElementById("tag-legend");
+  legend.innerHTML = "";
+  for (const tag of allCategories()) {
+    const item = document.createElement("div");
+    item.className = "tag-legend-item";
+    item.innerHTML = `<span class="tag-legend-dot" style="background:${tagColorHex(tag)}"></span>${escapeHTML(tag.label)}`;
+    legend.appendChild(item);
+  }
+}
+
 function renderDashboard() {
   renderGroupByToggle();
+  renderTagLegend();
 
   const banner = document.getElementById("prompt-banner");
   const prompt = ensureDailyPrompt();
@@ -619,7 +667,7 @@ function renderDashboard() {
 
   const visible = currentFilter === "all"
     ? friends
-    : friends.filter((f) => (f.category || "friend") === currentFilter);
+    : friends.filter((f) => normalizedTags(f).includes(currentFilter));
 
   grid.className = "friend-grid" + (visible.length >= 5 ? " cols-3" : "");
   grid.innerHTML = "";
@@ -773,12 +821,25 @@ document.getElementById("save-tiers-btn").addEventListener("click", async () => 
   location.hash = "";
 });
 
-/* ---------------- Categories ---------------- */
+/* ---------------- Categories / relationship tags ---------------- */
 
+// relationshipTags (array) replaced the old single-value category field, per
+// design doc §11.4 — a Bloom can carry multiple tags (e.g. Family + Coworker)
+// and shows under every tab it's tagged with. No Firestore migration: legacy
+// Blooms with only `category` set are translated on read via normalizedTags()
+// into a single-element array, so filtering/display/coloring all keep working
+// with zero visible change until a Bloom is actually re-tagged. The tag
+// registry (BUILTIN_CATEGORIES + rootData.customCategories) is unchanged —
+// only how tags are ASSIGNED to a Bloom changed, not how they're defined.
+// Tag colors are a deliberately separate palette from tier colors (design doc
+// §12.4) — different hue family so a garden card's color never gets mistaken
+// for a health signal. Built-ins are fixed; custom tags auto-cycle through
+// TAG_COLOR_PALETTE by creation order, no manual color picker in this pass.
 const BUILTIN_CATEGORIES = [
-  { id: "friend", label: "Friends" },
-  { id: "family", label: "Family" },
+  { id: "friend", label: "Friends", colorHex: "#7FA8D9" },
+  { id: "family", label: "Family", colorHex: "#E8879C" },
 ];
+const TAG_COLOR_PALETTE = ["#A78BC9", "#5FBFB3", "#E8B84B", "#8FBF6B", "#E8956B", "#6BA3BF"];
 function allCategories() {
   return [...BUILTIN_CATEGORIES, ...(rootData.customCategories || [])];
 }
@@ -786,27 +847,64 @@ function categoryLabel(id) {
   const c = allCategories().find((x) => x.id === id);
   return c ? c.label : "Friends";
 }
-function populateCategorySelect(selectEl, selectedId) {
-  selectEl.innerHTML = "";
-  for (const c of allCategories()) {
-    const opt = document.createElement("option");
-    opt.value = c.id;
-    opt.textContent = c.label;
-    if (c.id === selectedId) opt.selected = true;
-    selectEl.appendChild(opt);
-  }
-  const newOpt = document.createElement("option");
-  newOpt.value = "__new__";
-  newOpt.textContent = "+ New tab...";
-  selectEl.appendChild(newOpt);
+function normalizedTags(friend) {
+  if (Array.isArray(friend.relationshipTags) && friend.relationshipTags.length > 0) return friend.relationshipTags;
+  if (friend.category) return [friend.category];
+  return ["friend"];
+}
+// Custom tags created before colorHex existed on the record have none stored.
+// Rather than a single fallback (which would collide every such tag onto the
+// same color), hash the tag id into the palette for a stable-but-distinct pick.
+function fallbackTagColor(tagId) {
+  let hash = 0;
+  for (let i = 0; i < tagId.length; i++) hash = (hash * 31 + tagId.charCodeAt(i)) >>> 0;
+  return TAG_COLOR_PALETTE[hash % TAG_COLOR_PALETTE.length];
+}
+function tagColorHex(tag) {
+  return (tag && tag.colorHex) || fallbackTagColor(tag ? tag.id : "friend");
+}
+function tagPalette(tagId) {
+  const tag = allCategories().find((c) => c.id === tagId);
+  const colorHex = tagColorHex(tag);
+  return {
+    bg: tintHex(colorHex, 0.82),
+    petal: colorHex,
+    center: shadeHex(colorHex, 0.32),
+    ink: shadeHex(colorHex, 0.32),
+  };
+}
+function primaryTagPalette(friend) {
+  return tagPalette(normalizedTags(friend)[0]);
 }
 async function addCategory(label) {
   const uid = auth.currentUser.uid;
   const id = "c" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-  const cat = { id, label };
+  const colorHex = TAG_COLOR_PALETTE[(rootData.customCategories || []).length % TAG_COLOR_PALETTE.length];
+  const cat = { id, label, colorHex };
   await setDoc(doc(db, "users", uid), { customCategories: arrayUnion(cat) }, { merge: true });
   return cat;
 }
+
+// Reusable multi-select pill picker. selectedIds is a Set the caller owns;
+// onToggle fires after every click so the caller can persist (or just hold)
+// the change, then we re-render to reflect the new selection state.
+function renderTagPicker(container, selectedIds, onToggle) {
+  container.innerHTML = "";
+  for (const tag of allCategories()) {
+    const pill = document.createElement("button");
+    pill.type = "button";
+    pill.className = "tab-pill" + (selectedIds.has(tag.id) ? " active" : "");
+    pill.textContent = tag.label;
+    pill.onclick = () => {
+      if (selectedIds.has(tag.id)) selectedIds.delete(tag.id);
+      else selectedIds.add(tag.id);
+      onToggle([...selectedIds]);
+      renderTagPicker(container, selectedIds, onToggle);
+    };
+    container.appendChild(pill);
+  }
+}
+
 function renderCategoryTabs() {
   const wrap = document.getElementById("category-tabs");
   wrap.innerHTML = "";
@@ -824,11 +922,16 @@ function renderCategoryTabs() {
   addBtn.className = "tab-pill-add";
   addBtn.textContent = "+ New tab";
   addBtn.onclick = () => {
+    addCategoryOnCreate = (cat) => { currentFilter = cat.id; toast(`Created "${cat.label}" tab`); renderDashboard(); };
     document.getElementById("add-category-name").value = "";
     document.getElementById("modal-add-category").hidden = false;
   };
   wrap.appendChild(addBtn);
 }
+
+// Set by whoever opens the "new tag" modal (dashboard tab bar, Add a Bloom
+// form, or a Bloom's own tag picker) so Save can do the right thing per context.
+let addCategoryOnCreate = null;
 
 document.getElementById("add-category-close").onclick = () => { document.getElementById("modal-add-category").hidden = true; };
 document.getElementById("add-category-save").addEventListener("click", async () => {
@@ -836,13 +939,7 @@ document.getElementById("add-category-save").addEventListener("click", async () 
   if (!label) return;
   const cat = await addCategory(label);
   document.getElementById("modal-add-category").hidden = true;
-  currentFilter = cat.id;
-  toast(`Created "${label}" tab`);
-  renderDashboard();
-});
-
-document.getElementById("add-friend-category").addEventListener("change", (e) => {
-  document.getElementById("add-friend-new-category").hidden = e.target.value !== "__new__";
+  addCategoryOnCreate?.(cat);
 });
 
 document.getElementById("add-friend-cadence").addEventListener("change", (e) => {
@@ -869,19 +966,28 @@ function renderFriendDetail(id) {
 
   const header = document.getElementById("friend-header");
   header.style.background = colors.bg;
-  document.getElementById("friend-header-flower").innerHTML = flowerSVG(tier, tierIdx, tiers.length, 64);
+  document.getElementById("friend-header-flower").innerHTML = flowerSVG(colors, tierIdx, tiers.length, 64);
   document.getElementById("friend-name").textContent = f.name;
   document.getElementById("friend-status").textContent = isLowestTier
     ? `${tier.tierName} — ready when you are`
     : tierStatusText(tier.tierName, score);
   document.getElementById("friend-status").style.color = colors.ink;
 
-  const catSelect = document.getElementById("friend-category-select");
-  populateCategorySelect(catSelect, f.category || "friend");
-  catSelect.querySelector('option[value="__new__"]')?.remove();
-  catSelect.onchange = async () => {
+  const tagPickerEl = document.getElementById("friend-tag-picker");
+  const selectedTags = new Set(normalizedTags(f));
+  const saveTags = async (tags) => {
     const uid = auth.currentUser.uid;
-    await updateDoc(doc(db, "users", uid, "friends", f.id), { category: catSelect.value });
+    await updateDoc(doc(db, "users", uid, "friends", f.id), { relationshipTags: tags, category: null });
+  };
+  renderTagPicker(tagPickerEl, selectedTags, saveTags);
+  document.getElementById("friend-new-tag-btn").onclick = () => {
+    addCategoryOnCreate = (cat) => {
+      selectedTags.add(cat.id);
+      renderTagPicker(tagPickerEl, selectedTags, saveTags);
+      saveTags([...selectedTags]);
+    };
+    document.getElementById("add-category-name").value = "";
+    document.getElementById("modal-add-category").hidden = false;
   };
 
   const cadenceSelect = document.getElementById("friend-cadence-select");
@@ -917,7 +1023,9 @@ function renderFriendDetail(id) {
   cityInput.value = f.city || "";
   cityInput.onchange = async () => {
     const uid = auth.currentUser.uid;
-    await updateDoc(doc(db, "users", uid, "friends", f.id), { city: cityInput.value.trim() || null });
+    const newCity = cityInput.value.trim() || null;
+    await updateDoc(doc(db, "users", uid, "friends", f.id), { city: newCity });
+    refreshPromptTextIfCityEdited({ ...f, city: newCity });
   };
 
   const logBtn = document.getElementById("log-contact-btn");
@@ -1188,20 +1296,13 @@ document.getElementById("add-friend-save").addEventListener("click", async () =>
   const name = document.getElementById("add-friend-name").value.trim();
   if (!name) return;
   const uid = auth.currentUser.uid;
-  let category = document.getElementById("add-friend-category").value;
-  if (category === "__new__") {
-    const newLabel = document.getElementById("add-friend-new-category").value.trim();
-    if (!newLabel) return;
-    const cat = await addCategory(newLabel);
-    category = cat.id;
-  }
   const cadence = cadenceObjectFromInputs(
     document.getElementById("add-friend-cadence"),
     document.getElementById("add-friend-cadence-custom-days")
   );
   const city = document.getElementById("add-friend-city").value.trim() || null;
   const ref = await addDoc(collection(db, "users", uid, "friends"), {
-    name, category, cadence, city,
+    name, relationshipTags: [...addFriendSelectedTags], cadence, city,
     createdAt: Date.now(),
     notes: [], contacts: [], events: [],
   });

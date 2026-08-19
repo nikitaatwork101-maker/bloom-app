@@ -70,6 +70,8 @@
 
       <div id="category-tabs" class="category-tabs"></div>
 
+      <div id="tag-legend" class="tag-legend"></div>
+
       <div id="prompt-banner" class="prompt-banner" hidden>
         <div class="prompt-dot"></div>
         <div class="prompt-body">
@@ -99,7 +101,10 @@
           <div>
             <div class="friend-name" id="friend-name"></div>
             <div class="friend-status" id="friend-status"></div>
-            <select id="friend-category-select" class="category-select"></select>
+            <div class="tag-picker-row">
+              <div class="tag-picker" id="friend-tag-picker"></div>
+              <button type="button" class="tab-pill-add" id="friend-new-tag-btn">+ New tag</button>
+            </div>
             <select id="friend-cadence-select" class="category-select">
               <option value="">Check-in cadence: not set</option>
               <option value="daily">Daily</option>
@@ -216,8 +221,10 @@
         <input type="text" id="add-friend-city" placeholder="City (optional)" />
         <button type="button" class="icon-btn city-info-btn" title="Used to time prompts and notifications around this Bloom's day, and to suggest in-person vs. remote actions when you're in the same city." aria-label="Why we ask for city">&#9432;</button>
       </div>
-      <select id="add-friend-category"></select>
-      <input type="text" id="add-friend-new-category" placeholder="New tab name" hidden />
+      <div class="tag-picker-row">
+        <div class="tag-picker" id="add-friend-tag-picker"></div>
+        <button type="button" class="tab-pill-add" id="add-friend-new-tag-btn">+ New tag</button>
+      </div>
       <select id="add-friend-cadence">
         <option value="daily">Daily</option>
         <option value="weekly" selected>Weekly</option>
