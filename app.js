@@ -477,6 +477,19 @@ function setDailyPrompt(prompt) {
   }
 }
 
+// Design doc §12.5: notification center over "recent prompts and events."
+// Only the day's initial prompt assignment gets logged to history (not every
+// Change/Cancel override) — one entry per day, capped at 30, so the feed
+// reads as a digest rather than a click log. Events are derived live from
+// each Bloom's existing event data, no separate storage needed.
+function logPromptToHistory(prompt) {
+  const uid = auth.currentUser.uid;
+  const entry = { date: prompt.date, friendId: prompt.friendId, text: prompt.text, timestamp: Date.now() };
+  const history = [entry, ...(rootData.promptHistory || [])].slice(0, 30);
+  rootData.promptHistory = history;
+  setDoc(doc(db, "users", uid), { promptHistory: history }, { merge: true });
+}
+
 function ensureDailyPrompt() {
   if (friends.length === 0) return null;
   if (rootData.dailyPrompt && rootData.dailyPrompt.date === todayKey()) {
@@ -484,7 +497,10 @@ function ensureDailyPrompt() {
     return friends.some((f) => f.id === rootData.dailyPrompt.friendId) ? rootData.dailyPrompt : null;
   }
   const prompt = pickPrompt(null);
-  if (prompt) setDailyPrompt(prompt);
+  if (prompt) {
+    setDailyPrompt(prompt);
+    logPromptToHistory(prompt);
+  }
   return prompt;
 }
 
@@ -618,6 +634,138 @@ function renderGroupByToggle() {
   }
 }
 
+/* ---------------- Notification center ---------------- */
+
+function daysUntilLabel(timestamp) {
+  const days = Math.round((timestamp - Date.now()) / DAY_MS);
+  if (days === 0) return "today";
+  if (days === 1) return "tomorrow";
+  if (days > 1) return `in ${days} days`;
+  if (days === -1) return "yesterday";
+  return `${Math.abs(days)} days ago`;
+}
+
+// "Coming up": events within the next 14 days, soonest first — a reminder
+// feed, so soonest-first is more useful here than strict reverse-chronological.
+function upcomingEventNotifications() {
+  const now = Date.now();
+  const horizon = now + 14 * DAY_MS;
+  const items = [];
+  for (const f of friends) {
+    for (const ev of f.events || []) {
+      const occ = nextOccurrence(ev).getTime();
+      if (occ >= now - DAY_MS && occ <= horizon) {
+        const meta = EVENT_TYPE_META[ev.type];
+        const label = ev.label || `${f.name} — ${meta.label}`;
+        items.push({
+          id: `event-${f.id}-${ev.id}-${new Date(occ).toDateString()}`,
+          timestamp: occ,
+          friendId: f.id,
+          text: `${meta.icon} ${label} — ${daysUntilLabel(occ)}`,
+        });
+      }
+    }
+  }
+  return items.sort((a, b) => a.timestamp - b.timestamp);
+}
+
+// "Recent": past daily-prompt assignments, most recent first — true
+// reverse-chronological, per design doc §12.5.
+function promptHistoryNotifications() {
+  return (rootData.promptHistory || [])
+    .map((p) => ({
+      id: `prompt-${p.date}`,
+      timestamp: p.timestamp,
+      friendId: p.friendId,
+      text: `Today's prompt: ${p.text}`,
+    }))
+    .sort((a, b) => b.timestamp - a.timestamp);
+}
+
+function allNotifications() {
+  return [...upcomingEventNotifications(), ...promptHistoryNotifications()];
+}
+
+function renderNotifBadge() {
+  const readIds = new Set(rootData.readNotificationIds || []);
+  const unread = allNotifications().filter((n) => !readIds.has(n.id));
+  const badge = document.getElementById("notif-badge");
+  if (unread.length > 0) {
+    badge.hidden = false;
+    badge.textContent = unread.length > 9 ? "9+" : String(unread.length);
+  } else {
+    badge.hidden = true;
+  }
+}
+
+function renderNotifSidebar() {
+  const upcoming = upcomingEventNotifications();
+  const history = promptHistoryNotifications();
+  const readIds = new Set(rootData.readNotificationIds || []);
+  const list = document.getElementById("notif-list");
+  list.innerHTML = "";
+
+  const addSection = (title, items) => {
+    if (items.length === 0) return;
+    const h = document.createElement("div");
+    h.className = "notif-section-title";
+    h.textContent = title;
+    list.appendChild(h);
+    for (const n of items) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "notif-item" + (!readIds.has(n.id) ? " unread" : "");
+      btn.innerHTML = `<div class="notif-item-text">${escapeHTML(n.text)}</div>`;
+      btn.onclick = () => {
+        closeNotifSidebar();
+        if (n.friendId) location.hash = `#/friend/${n.friendId}`;
+      };
+      list.appendChild(btn);
+    }
+  };
+  addSection("Coming up", upcoming);
+  addSection("Recent", history);
+
+  if (upcoming.length === 0 && history.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.textContent = "Nothing here yet.";
+    list.appendChild(empty);
+  }
+}
+
+// Read state persists in Firestore (design doc §12.5), pruned to only ids
+// still present in the current feed so it can't grow unbounded as events
+// and prompt-history entries age out.
+function markAllNotificationsRead() {
+  const currentIds = new Set(allNotifications().map((n) => n.id));
+  const readIds = new Set(rootData.readNotificationIds || []);
+  for (const id of currentIds) readIds.add(id);
+  const pruned = [...readIds].filter((id) => currentIds.has(id));
+  const prevLen = (rootData.readNotificationIds || []).length;
+  rootData.readNotificationIds = pruned;
+  if (pruned.length !== prevLen) {
+    const uid = auth.currentUser.uid;
+    setDoc(doc(db, "users", uid), { readNotificationIds: pruned }, { merge: true });
+  }
+}
+
+function openNotifSidebar() {
+  renderNotifSidebar();
+  document.getElementById("notif-sidebar").hidden = false;
+  document.getElementById("notif-backdrop").hidden = false;
+  markAllNotificationsRead();
+  renderNotifBadge();
+  renderNotifSidebar();
+}
+function closeNotifSidebar() {
+  document.getElementById("notif-sidebar").hidden = true;
+  document.getElementById("notif-backdrop").hidden = true;
+}
+document.getElementById("notif-bell-btn").addEventListener("click", openNotifSidebar);
+document.getElementById("notif-sidebar-close").addEventListener("click", closeNotifSidebar);
+document.getElementById("notif-backdrop").addEventListener("click", closeNotifSidebar);
+
 function renderTagLegend() {
   const legend = document.getElementById("tag-legend");
   legend.innerHTML = "";
@@ -647,6 +795,8 @@ function renderDashboard() {
   } else {
     banner.hidden = true;
   }
+
+  renderNotifBadge();
 
   const tabs = document.getElementById("category-tabs");
   const grid = document.getElementById("friend-grid");

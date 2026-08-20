@@ -58,6 +58,10 @@
       <header class="dash-header">
         <div class="dash-title">Your garden</div>
         <div class="dash-header-actions">
+          <button id="notif-bell-btn" class="settings-btn" title="Notifications" aria-label="Notifications">
+            &#128276;
+            <span id="notif-badge" class="notif-badge" hidden>0</span>
+          </button>
           <button id="settings-btn" class="settings-btn" title="Settings" aria-label="Settings">&#9881;&#65039;</button>
           <button id="avatar-btn" class="avatar-btn" title="Account" aria-label="Account"></button>
         </div>
@@ -291,6 +295,15 @@
     <button type="button" class="btn-primary btn-block" id="add-event-save">Save event</button>
     <button type="button" class="modal-close" id="add-event-close" aria-label="Close">&times;</button>
   </div>
+</div>
+
+<div id="notif-backdrop" class="notif-backdrop" hidden></div>
+<div id="notif-sidebar" class="notif-sidebar" hidden>
+  <div class="notif-sidebar-header">
+    <div class="notif-sidebar-title">Notifications</div>
+    <button type="button" class="modal-close" id="notif-sidebar-close" aria-label="Close">&times;</button>
+  </div>
+  <div id="notif-list" class="notif-list"></div>
 </div>
 
 <div id="toast" class="toast" hidden></div>
