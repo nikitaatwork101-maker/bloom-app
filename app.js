@@ -281,12 +281,33 @@ function todayKey() {
   const d = new Date();
   return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
 }
+/* ---------------- Animated show/hide for overlays (modals, sidebar, toast) ---------------- */
+/* Keeps `hidden` as the source of truth (unhidden = false/true still works everywhere),
+   just gives the transition a moment to play before the element leaves the render tree. */
+function openOverlay(el) {
+  el.hidden = false;
+  el.classList.remove("closing");
+  requestAnimationFrame(() => el.classList.add("open"));
+}
+function closeOverlay(el) {
+  if (el.hidden) return;
+  el.classList.remove("open");
+  el.classList.add("closing");
+  const done = () => {
+    el.classList.remove("closing");
+    el.hidden = true;
+    el.removeEventListener("transitionend", done);
+  };
+  el.addEventListener("transitionend", done);
+  setTimeout(done, 220); // fallback (reduced-motion / no transitionend)
+}
+
 function toast(msg) {
   const el = document.getElementById("toast");
   el.textContent = msg;
-  el.hidden = false;
+  openOverlay(el);
   clearTimeout(toast._t);
-  toast._t = setTimeout(() => { el.hidden = true; }, 2600);
+  toast._t = setTimeout(() => { closeOverlay(el); }, 2600);
 }
 
 /* ---------------- Events / calendar export ---------------- */
@@ -534,7 +555,7 @@ function changeDailyPrompt(newFriendId) {
   const f = friends.find((x) => x.id === newFriendId);
   if (!f) return;
   setDailyPrompt({ date: todayKey(), friendId: f.id, text: promptText(f) });
-  document.getElementById("modal-change-prompt").hidden = true;
+  closeOverlay(document.getElementById("modal-change-prompt"));
   renderDashboard();
 }
 
@@ -556,9 +577,9 @@ function openChangePromptModal(currentFriendIdForPrompt) {
     btn.onclick = () => changeDailyPrompt(f.id);
     list.appendChild(btn);
   }
-  document.getElementById("modal-change-prompt").hidden = false;
+  openOverlay(document.getElementById("modal-change-prompt"));
 }
-document.getElementById("change-prompt-close").onclick = () => { document.getElementById("modal-change-prompt").hidden = true; };
+document.getElementById("change-prompt-close").onclick = () => { closeOverlay(document.getElementById("modal-change-prompt")); };
 
 function buildFriendCard(f, tiers) {
   const score = currentHealth(f);
@@ -602,12 +623,12 @@ function buildAddFriendTile(defaultCategory) {
         renderTagPicker(picker, addFriendSelectedTags, () => {});
       };
       document.getElementById("add-category-name").value = "";
-      document.getElementById("modal-add-category").hidden = false;
+      openOverlay(document.getElementById("modal-add-category"));
     };
     document.getElementById("add-friend-cadence").value = "weekly";
     document.getElementById("add-friend-cadence-custom-days").hidden = true;
     document.getElementById("add-friend-cadence-custom-days").value = "";
-    document.getElementById("modal-add-friend").hidden = false;
+    openOverlay(document.getElementById("modal-add-friend"));
   };
   return addTile;
 }
@@ -752,15 +773,15 @@ function markAllNotificationsRead() {
 
 function openNotifSidebar() {
   renderNotifSidebar();
-  document.getElementById("notif-sidebar").hidden = false;
-  document.getElementById("notif-backdrop").hidden = false;
+  openOverlay(document.getElementById("notif-sidebar"));
+  openOverlay(document.getElementById("notif-backdrop"));
   markAllNotificationsRead();
   renderNotifBadge();
   renderNotifSidebar();
 }
 function closeNotifSidebar() {
-  document.getElementById("notif-sidebar").hidden = true;
-  document.getElementById("notif-backdrop").hidden = true;
+  closeOverlay(document.getElementById("notif-sidebar"));
+  closeOverlay(document.getElementById("notif-backdrop"));
 }
 document.getElementById("notif-bell-btn").addEventListener("click", openNotifSidebar);
 document.getElementById("notif-sidebar-close").addEventListener("click", closeNotifSidebar);
@@ -1074,7 +1095,7 @@ function renderCategoryTabs() {
   addBtn.onclick = () => {
     addCategoryOnCreate = (cat) => { currentFilter = cat.id; toast(`Created "${cat.label}" tab`); renderDashboard(); };
     document.getElementById("add-category-name").value = "";
-    document.getElementById("modal-add-category").hidden = false;
+    openOverlay(document.getElementById("modal-add-category"));
   };
   wrap.appendChild(addBtn);
 }
@@ -1083,12 +1104,12 @@ function renderCategoryTabs() {
 // form, or a Bloom's own tag picker) so Save can do the right thing per context.
 let addCategoryOnCreate = null;
 
-document.getElementById("add-category-close").onclick = () => { document.getElementById("modal-add-category").hidden = true; };
+document.getElementById("add-category-close").onclick = () => { closeOverlay(document.getElementById("modal-add-category")); };
 document.getElementById("add-category-save").addEventListener("click", async () => {
   const label = document.getElementById("add-category-name").value.trim();
   if (!label) return;
   const cat = await addCategory(label);
-  document.getElementById("modal-add-category").hidden = true;
+  closeOverlay(document.getElementById("modal-add-category"));
   addCategoryOnCreate?.(cat);
 });
 
@@ -1137,7 +1158,7 @@ function renderFriendDetail(id) {
       saveTags([...selectedTags]);
     };
     document.getElementById("add-category-name").value = "";
-    document.getElementById("modal-add-category").hidden = false;
+    openOverlay(document.getElementById("modal-add-category"));
   };
 
   const cadenceSelect = document.getElementById("friend-cadence-select");
@@ -1217,7 +1238,7 @@ function renderFriendDetail(id) {
     document.getElementById("add-note-save").textContent = "Save note";
     document.getElementById("add-note-emoji").value = "☕";
     document.getElementById("add-note-text").value = "";
-    document.getElementById("modal-add-note").hidden = false;
+    openOverlay(document.getElementById("modal-add-note"));
   };
   notesRow.appendChild(addNote);
 
@@ -1280,7 +1301,7 @@ function renderFriendDetail(id) {
     document.getElementById("add-event-label").value = "";
     document.getElementById("add-event-date").value = "";
     document.getElementById("add-event-recurring").checked = true;
-    document.getElementById("modal-add-event").hidden = false;
+    openOverlay(document.getElementById("modal-add-event"));
   };
 
   const historyList = document.getElementById("history-list");
@@ -1362,7 +1383,7 @@ function openLogModal(friendId) {
   buildCupRow(null);
   document.getElementById("log-contact-date").value = dateInputValue(Date.now());
   document.getElementById("log-save-btn").disabled = true;
-  document.getElementById("modal-log-contact").hidden = false;
+  openOverlay(document.getElementById("modal-log-contact"));
 }
 
 function openEditContactModal(friendId, contactId) {
@@ -1379,7 +1400,7 @@ function openEditContactModal(friendId, contactId) {
   buildCupRow(c.quality);
   document.getElementById("log-contact-date").value = dateInputValue(c.timestamp);
   document.getElementById("log-save-btn").disabled = false;
-  document.getElementById("modal-log-contact").hidden = false;
+  openOverlay(document.getElementById("modal-log-contact"));
 }
 
 document.querySelectorAll(".contact-type-row").forEach((btn) => {
@@ -1434,14 +1455,14 @@ document.getElementById("log-save-btn").addEventListener("click", async () => {
     refreshPromptIfLoggedToday(currentFriendId);
   }
 
-  document.getElementById("modal-log-contact").hidden = true;
+  closeOverlay(document.getElementById("modal-log-contact"));
   if (parseHash().view !== "friend") location.hash = `#/friend/${currentFriendId}`;
 });
-document.getElementById("log-modal-close").onclick = () => { document.getElementById("modal-log-contact").hidden = true; };
+document.getElementById("log-modal-close").onclick = () => { closeOverlay(document.getElementById("modal-log-contact")); };
 
 /* ---------------- Add friend modal ---------------- */
 
-document.getElementById("add-friend-close").onclick = () => { document.getElementById("modal-add-friend").hidden = true; };
+document.getElementById("add-friend-close").onclick = () => { closeOverlay(document.getElementById("modal-add-friend")); };
 document.getElementById("add-friend-save").addEventListener("click", async () => {
   const name = document.getElementById("add-friend-name").value.trim();
   if (!name) return;
@@ -1458,7 +1479,7 @@ document.getElementById("add-friend-save").addEventListener("click", async () =>
   });
   document.getElementById("add-friend-name").value = "";
   document.getElementById("add-friend-city").value = "";
-  document.getElementById("modal-add-friend").hidden = true;
+  closeOverlay(document.getElementById("modal-add-friend"));
   toast(`Planted a new Bloom for ${name} \u{1F33F}`);
   location.hash = `#/friend/${ref.id}`;
 });
@@ -1475,10 +1496,10 @@ function openEditNoteModal(friendId, noteId) {
   document.getElementById("add-note-save").textContent = "Save changes";
   document.getElementById("add-note-emoji").value = n.emoji;
   document.getElementById("add-note-text").value = n.text;
-  document.getElementById("modal-add-note").hidden = false;
+  openOverlay(document.getElementById("modal-add-note"));
 }
 
-document.getElementById("add-note-close").onclick = () => { document.getElementById("modal-add-note").hidden = true; };
+document.getElementById("add-note-close").onclick = () => { closeOverlay(document.getElementById("modal-add-note")); };
 document.getElementById("add-note-save").addEventListener("click", async () => {
   const text = document.getElementById("add-note-text").value.trim();
   const emoji = document.getElementById("add-note-emoji").value;
@@ -1492,7 +1513,7 @@ document.getElementById("add-note-save").addEventListener("click", async () => {
     await replaceArrayField(addNoteFriendId, "notes", [...(f.notes || []), { id: crypto.randomUUID(), emoji, text }]);
     toast("Note saved");
   }
-  document.getElementById("modal-add-note").hidden = true;
+  closeOverlay(document.getElementById("modal-add-note"));
 });
 
 /* ---------------- Add event modal ---------------- */
@@ -1509,10 +1530,10 @@ function openEditEventModal(friendId, eventId) {
   document.getElementById("add-event-label").value = ev.label || "";
   document.getElementById("add-event-date").value = ev.date;
   document.getElementById("add-event-recurring").checked = ev.recurring;
-  document.getElementById("modal-add-event").hidden = false;
+  openOverlay(document.getElementById("modal-add-event"));
 }
 
-document.getElementById("add-event-close").onclick = () => { document.getElementById("modal-add-event").hidden = true; };
+document.getElementById("add-event-close").onclick = () => { closeOverlay(document.getElementById("modal-add-event")); };
 document.getElementById("add-event-type").addEventListener("change", (e) => {
   document.getElementById("add-event-recurring").checked =
     e.target.value === "birthday" || e.target.value === "anniversary";
@@ -1537,7 +1558,7 @@ document.getElementById("add-event-save").addEventListener("click", async () => 
     ]);
     toast("Event saved");
   }
-  document.getElementById("modal-add-event").hidden = true;
+  closeOverlay(document.getElementById("modal-add-event"));
 });
 
 /* ---------------- Auth ---------------- */
