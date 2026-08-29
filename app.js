@@ -310,6 +310,166 @@ function toast(msg) {
   toast._t = setTimeout(() => { closeOverlay(el); }, 2600);
 }
 
+/* ---------------- Guided tour ---------------- */
+// A short, skippable walkthrough. Auto-launches once per account
+// (tracked via rootData.tutorialSeen) and is always replayable from the
+// "?" button next to Settings. Non-interactive by design: it dims and
+// points, it doesn't hand control to the highlighted element, so a stray
+// click can't leave it in a half-finished state.
+
+function buildTourSteps() {
+  const addTile = document.querySelector(".add-friend-tile");
+  const logBtn = document.querySelector(".friend-card .fc-log");
+  const promptBanner = document.getElementById("prompt-banner");
+  const bell = document.getElementById("notif-bell-btn");
+
+  return [
+    {
+      title: "Welcome to your garden",
+      body: "Every person you add gets a flower that reflects how connected you've stayed. The single biggest thing that keeps a friendship alive isn't one grand gesture — it's showing up often. A quick text every couple of weeks beats one big catch-up every couple of years.",
+    },
+    {
+      target: addTile || null,
+      title: "Plant your first Bloom",
+      body: "Add anyone you want to stay close to — family, an old roommate, a friend across the world. Each one gets its own flower the moment you create it.",
+    },
+    {
+      target: (logBtn && logBtn.offsetParent) ? logBtn : null,
+      title: "Log contact in a few taps",
+      body: "Message, call, or video chat — pick the type, rate how full your cup felt, done. That flower updates right away.",
+    },
+    {
+      target: (promptBanner && !promptBanner.hidden) ? promptBanner : null,
+      title: "Your daily nudge",
+      body: "Each day Bloom points you toward whoever's flower needs you most, so reaching out becomes a habit instead of something you have to remember on your own.",
+    },
+    {
+      target: bell || null,
+      title: "A quiet record, not another notification",
+      body: "The bell keeps track of prompts and events right here in the app — no push permissions, no pop-ups you didn't ask for.",
+    },
+    {
+      title: "That's the whole idea",
+      body: "Frequency beats grand gestures — a little, often, is what actually keeps people close. Go plant your garden.",
+    },
+  ];
+}
+
+let tourState = null;
+
+function startTour() {
+  if (tourState) return;
+  const overlay = document.createElement("div");
+  overlay.className = "tour-overlay";
+  overlay.innerHTML = `
+    <div class="tour-spotlight" id="tour-spotlight" hidden></div>
+    <div class="tour-card" id="tour-card" role="dialog" aria-label="How Bloom works">
+      <div class="tour-progress" id="tour-progress"></div>
+      <div class="tour-title" id="tour-title"></div>
+      <div class="tour-body" id="tour-body"></div>
+      <div class="tour-actions">
+        <button type="button" class="link-btn" id="tour-skip">Skip</button>
+        <div class="tour-nav">
+          <button type="button" class="icon-btn" id="tour-back">Back</button>
+          <button type="button" class="btn-primary" id="tour-next">Next</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  tourState = { steps: buildTourSteps(), index: 0, overlay };
+
+  document.getElementById("tour-skip").onclick = endTour;
+  document.getElementById("tour-back").onclick = () => gotoTourStep(tourState.index - 1);
+  document.getElementById("tour-next").onclick = () => {
+    if (tourState.index >= tourState.steps.length - 1) { endTour(); return; }
+    gotoTourStep(tourState.index + 1);
+  };
+  window.addEventListener("resize", positionTourStep);
+  document.addEventListener("keydown", tourKeydown);
+
+  requestAnimationFrame(() => {
+    overlay.classList.add("open");
+    gotoTourStep(0);
+  });
+}
+
+function tourKeydown(e) {
+  if (e.key === "Escape") endTour();
+}
+
+function gotoTourStep(i) {
+  if (!tourState) return;
+  tourState.index = Math.max(0, Math.min(i, tourState.steps.length - 1));
+  const step = tourState.steps[tourState.index];
+  document.getElementById("tour-title").textContent = step.title;
+  document.getElementById("tour-body").textContent = step.body;
+  document.getElementById("tour-progress").textContent = `${tourState.index + 1} of ${tourState.steps.length}`;
+  document.getElementById("tour-back").hidden = tourState.index === 0;
+  document.getElementById("tour-next").textContent =
+    tourState.index === tourState.steps.length - 1 ? "Got it" : "Next";
+  positionTourStep();
+}
+
+function positionTourStep() {
+  if (!tourState) return;
+  const step = tourState.steps[tourState.index];
+  const spotlight = document.getElementById("tour-spotlight");
+  const card = document.getElementById("tour-card");
+  if (!step.target || !step.target.isConnected) {
+    spotlight.hidden = true;
+    card.classList.add("centered");
+    card.style.top = "";
+    card.style.left = "";
+    return;
+  }
+  card.classList.remove("centered");
+  step.target.scrollIntoView({ block: "center", behavior: "smooth" });
+  const r = step.target.getBoundingClientRect();
+  const pad = 8;
+  spotlight.hidden = false;
+  spotlight.style.top = `${r.top - pad}px`;
+  spotlight.style.left = `${r.left - pad}px`;
+  spotlight.style.width = `${r.width + pad * 2}px`;
+  spotlight.style.height = `${r.height + pad * 2}px`;
+
+  const cardRect = card.getBoundingClientRect();
+  let top = r.bottom + 16;
+  if (top + cardRect.height > window.innerHeight - 16) top = Math.max(16, r.top - cardRect.height - 16);
+  const left = Math.min(Math.max(16, r.left), window.innerWidth - cardRect.width - 16);
+  card.style.top = `${top}px`;
+  card.style.left = `${left}px`;
+}
+
+function endTour() {
+  if (!tourState) return;
+  const overlay = tourState.overlay;
+  overlay.classList.remove("open");
+  window.removeEventListener("resize", positionTourStep);
+  document.removeEventListener("keydown", tourKeydown);
+  tourState = null;
+  setTimeout(() => overlay.remove(), 220);
+  markTutorialSeen();
+}
+
+function markTutorialSeen() {
+  if (rootData.tutorialSeen) return;
+  rootData.tutorialSeen = true;
+  if (auth.currentUser) {
+    setDoc(doc(db, "users", auth.currentUser.uid), { tutorialSeen: true }, { merge: true });
+  }
+}
+
+let tourAutoLaunchArmed = false;
+function maybeAutoStartTour() {
+  if (tourAutoLaunchArmed || tourState) return;
+  if (!rootDataLoaded || rootData.tutorialSeen) return;
+  tourAutoLaunchArmed = true;
+  setTimeout(startTour, 500);
+}
+
+document.getElementById("tour-btn").addEventListener("click", startTour);
+
 /* ---------------- Events / calendar export ---------------- */
 
 function nextOccurrence(ev) {
@@ -377,6 +537,7 @@ function downloadICS(filename, content) {
 
 let friends = [];
 let rootData = {};
+let rootDataLoaded = false;
 let unsubFriends = null;
 let unsubRoot = null;
 let currentFriendId = null;
@@ -424,7 +585,15 @@ function showView(id) {
 }
 
 function render() {
-  if (!auth.currentUser) { showView("view-signin"); return; }
+  const landingEl = document.getElementById("landing-page");
+  const appEl = document.getElementById("app");
+  if (!auth.currentUser) {
+    landingEl.hidden = false;
+    appEl.hidden = true;
+    return;
+  }
+  landingEl.hidden = true;
+  appEl.hidden = false;
   const route = parseHash();
   if (route.view === "friend" && friends.some((f) => f.id === route.id)) {
     currentFriendId = route.id;
@@ -439,6 +608,7 @@ function render() {
       : null;
     renderDashboard();
     showView("view-dashboard");
+    maybeAutoStartTour();
   }
 }
 window.addEventListener("hashchange", render);
@@ -1638,7 +1808,6 @@ document.getElementById("avatar-btn").addEventListener("click", () => {
 
 onAuthStateChanged(auth, (user) => {
   document.getElementById("loading-screen").hidden = true;
-  document.getElementById("app").hidden = false;
 
   if (unsubFriends) { unsubFriends(); unsubFriends = null; }
   if (unsubRoot) { unsubRoot(); unsubRoot = null; }
@@ -1646,13 +1815,19 @@ onAuthStateChanged(auth, (user) => {
   if (!user) {
     friends = [];
     rootData = {};
+    rootDataLoaded = false;
     render();
     return;
   }
 
+  // Signed in successfully — the sign-in modal (opened on top of the landing
+  // page) has done its job, close it before the dashboard takes over.
+  closeOverlay(document.getElementById("modal-signin"));
+
   const uid = user.uid;
   unsubRoot = onSnapshot(doc(db, "users", uid), (snap) => {
     rootData = snap.data() || {};
+    rootDataLoaded = true;
     render();
   });
   unsubFriends = onSnapshot(collection(db, "users", uid, "friends"), (snap) => {
@@ -1661,5 +1836,45 @@ onAuthStateChanged(auth, (user) => {
     backfillContactIds();
   });
 });
+
+/* ---------------- Landing page ---------------- */
+// Every entry point on the landing page opens the sign-in modal on top of it,
+// rather than navigating away — there's only one document now.
+["landing-signin-btn", "landing-hero-cta", "landing-research-cta", "landing-final-cta"].forEach((id) => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener("click", () => openOverlay(document.getElementById("modal-signin")));
+});
+document.getElementById("signin-modal-close").addEventListener("click", () => {
+  closeOverlay(document.getElementById("modal-signin"));
+});
+
+// Hero flower blooms in once, shortly after load.
+requestAnimationFrame(() => {
+  setTimeout(() => {
+    const heroFlower = document.getElementById("hero-flower");
+    if (heroFlower) heroFlower.classList.add("bloomed");
+  }, 120);
+});
+
+// Reveal-on-scroll + tier-strip stagger on the landing page, both
+// IntersectionObserver-driven and cheap to leave running.
+const landingRevealIo = new IntersectionObserver((entries) => {
+  entries.forEach((e) => { if (e.isIntersecting) { e.target.classList.add("in"); landingRevealIo.unobserve(e.target); } });
+}, { threshold: 0.2 });
+document.querySelectorAll("#landing-page .reveal").forEach((el) => landingRevealIo.observe(el));
+
+const landingTierRow = document.getElementById("tier-row");
+if (landingTierRow) {
+  const tierCards = landingTierRow.querySelectorAll(".tier-card");
+  const landingTierIo = new IntersectionObserver((entries) => {
+    entries.forEach((e) => {
+      if (e.isIntersecting) {
+        tierCards.forEach((card, i) => setTimeout(() => card.classList.add("in"), i * 60));
+        landingTierIo.disconnect();
+      }
+    });
+  }, { threshold: 0.3 });
+  landingTierIo.observe(landingTierRow);
+}
 
 render();

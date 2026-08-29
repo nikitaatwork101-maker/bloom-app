@@ -4,10 +4,10 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Bloom</title>
-<meta name="description" content="See which Blooms need a little water." />
+<meta name="description" content="Bloom turns every relationship you care about into a flower — so you notice it fading before it's cold." />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='9' r='6' fill='%239FC474'/%3E%3Ccircle cx='23' cy='16' r='6' fill='%239FC474'/%3E%3Ccircle cx='16' cy='23' r='6' fill='%239FC474'/%3E%3Ccircle cx='9' cy='16' r='6' fill='%239FC474'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%236f9a3f'/%3E%3C/svg%3E" />
 <link rel="stylesheet" href="styles.css" />
 </head>
@@ -21,36 +21,238 @@
   </div>
 </div>
 
-<div id="app" hidden>
+<!-- Landing page (shown when signed out) -->
+<div id="landing-page">
 
-  <!-- Sign in / Sign up -->
-  <section id="view-signin" class="view">
-    <div class="auth-card">
-      <div class="auth-mark">
-        <svg viewBox="0 0 44 44" width="44" height="44" aria-hidden="true">
+  <div class="nav">
+    <div class="nav-row">
+      <div class="brand">
+        <svg viewBox="0 0 44 44" aria-hidden="true">
           <circle cx="22" cy="8" r="8" fill="#9FC474"/>
           <circle cx="36" cy="22" r="8" fill="#9FC474"/>
           <circle cx="22" cy="36" r="8" fill="#9FC474"/>
           <circle cx="8" cy="22" r="8" fill="#9FC474"/>
           <circle cx="22" cy="22" r="6.5" fill="#6f9a3f"/>
         </svg>
-        <div class="wordmark">Bloom</div>
-        <div class="subhead">See which Blooms need a little water</div>
+        Bloom
       </div>
-      <form id="signin-form" class="auth-form">
-        <input type="email" id="signin-email" placeholder="Email" autocomplete="email" required />
-        <input type="password" id="signin-password" placeholder="Password" autocomplete="current-password" required />
-        <button type="button" id="forgot-password" class="forgot-link">Forgot password?</button>
-        <p id="signin-error" class="form-error" hidden></p>
-        <p id="signin-success" class="form-success" hidden></p>
-        <button type="submit" class="btn-primary btn-block" id="signin-submit">Sign in</button>
-      </form>
-      <div class="auth-footer">
-        <span id="auth-toggle-label">New here?</span>
-        <button type="button" id="auth-toggle" class="link-btn">Create an account</button>
+      <button type="button" class="nav-cta" id="landing-signin-btn">Sign in</button>
+    </div>
+  </div>
+
+  <section class="hero">
+    <div>
+      <span class="eyebrow">A living signal for every relationship</span>
+      <h1>Some Blooms fade<br>without a single<br><em>wilted leaf</em> to warn you.</h1>
+      <p class="hero-sub">Bloom turns everyone you care about into a flower. Log a message, call, or visit, and it reacts — so you notice a relationship going quiet while there's still time to water it, not after it's gone cold.</p>
+      <div class="hero-actions">
+        <button type="button" class="btn-primary" id="landing-hero-cta">Plant your first Bloom →</button>
+        <a class="link-quiet" href="#how">See how it works</a>
+      </div>
+    </div>
+    <div class="hero-flower-wrap">
+      <svg class="hero-flower" id="hero-flower" viewBox="0 0 200 200" aria-hidden="true">
+        <circle class="petal" cx="100" cy="46" r="46" fill="#9FC474"/>
+        <circle class="petal" cx="154" cy="100" r="46" fill="#9FC474"/>
+        <circle class="petal" cx="100" cy="154" r="46" fill="#9FC474"/>
+        <circle class="petal" cx="46" cy="100" r="46" fill="#9FC474"/>
+        <circle class="center" cx="100" cy="100" r="38" fill="#6f9a3f"/>
+      </svg>
+    </div>
+  </section>
+
+  <section class="problem">
+    <div class="problem-inner reveal">
+      <svg class="problem-mark" viewBox="0 0 44 44" aria-hidden="true">
+        <circle cx="22" cy="8" r="8" fill="#9FC474"/><circle cx="36" cy="22" r="8" fill="#9FC474"/>
+        <circle cx="22" cy="36" r="8" fill="#9FC474"/><circle cx="8" cy="22" r="8" fill="#9FC474"/>
+        <circle cx="22" cy="22" r="6.5" fill="#FFFDF9"/>
+      </svg>
+      <h2>People let relationships fade not because they stop caring — but because there's no visible sign anything is wrong, until it already is.</h2>
+      <p class="problem-cap">A plant on your desk wilts where you can see it. A friendship doesn't. Bloom gives it the same warning a leaf gives you.</p>
+    </div>
+  </section>
+
+  <section class="band" id="how">
+    <div class="wrap">
+      <div class="band-head reveal">
+        <h2>How a Bloom grows</h2>
+        <p>Three habits, each small enough to do in a few taps.</p>
+      </div>
+      <div class="steps">
+        <div class="step reveal">
+          <div class="step-verb">Plant</div>
+          <div class="step-body">
+            <h3>Add a Bloom for anyone who matters</h3>
+            <p>Family, an old roommate, someone you only see once a year — each one gets its own flower the moment you add them.</p>
+          </div>
+        </div>
+        <div class="step reveal">
+          <div class="step-verb">Log</div>
+          <div class="step-body">
+            <h3>A message, a call, a video chat</h3>
+            <p>Logging contact takes a few taps — pick the type, rate how full your cup felt from barely to overflowing, done.</p>
+          </div>
+        </div>
+        <div class="step reveal">
+          <div class="step-verb">Tend</div>
+          <div class="step-body">
+            <h3>Watch the health score do the remembering</h3>
+            <p>Contact and quiet time both move the score in real time. A daily prompt points you toward whoever needs you most today.</p>
+          </div>
+        </div>
       </div>
     </div>
   </section>
+
+  <section class="tiers">
+    <div class="band-head reveal">
+      <h2>Five states, one glance</h2>
+      <p>No numbers to decode on the way in — just a flower that tells you the truth.</p>
+    </div>
+    <div class="tier-row" id="tier-row">
+      <div class="tier-card">
+        <svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="26" r="22" fill="var(--bloom-petal)"/><circle cx="74" cy="50" r="22" fill="var(--bloom-petal)"/><circle cx="50" cy="74" r="22" fill="var(--bloom-petal)"/><circle cx="26" cy="50" r="22" fill="var(--bloom-petal)"/><circle cx="50" cy="50" r="18" fill="var(--bloom-center)"/></svg>
+        <div class="tier-name">Blooming</div>
+      </div>
+      <div class="tier-card">
+        <svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="26" r="22" fill="var(--healthy-petal)"/><circle cx="74" cy="50" r="22" fill="var(--healthy-petal)"/><circle cx="50" cy="74" r="22" fill="var(--healthy-petal)"/><circle cx="26" cy="50" r="22" fill="var(--healthy-petal)"/><circle cx="50" cy="50" r="18" fill="var(--healthy-center)"/></svg>
+        <div class="tier-name">Healthy</div>
+      </div>
+      <div class="tier-card">
+        <svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="26" r="22" fill="var(--wilt-petal)"/><circle cx="74" cy="50" r="22" fill="var(--wilt-petal)"/><circle cx="50" cy="74" r="22" fill="var(--wilt-petal)"/><circle cx="26" cy="50" r="22" fill="var(--wilt-petal)"/><circle cx="50" cy="50" r="18" fill="var(--wilt-center)"/></svg>
+        <div class="tier-name">Wilting</div>
+      </div>
+      <div class="tier-card">
+        <svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="26" r="22" fill="var(--dying-petal)"/><circle cx="74" cy="50" r="22" fill="var(--dying-petal)"/><circle cx="50" cy="74" r="22" fill="var(--dying-petal)"/><circle cx="26" cy="50" r="22" fill="var(--dying-petal)"/><circle cx="50" cy="50" r="18" fill="var(--dying-center)"/></svg>
+        <div class="tier-name">Struggling</div>
+      </div>
+      <div class="tier-card">
+        <svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="26" r="22" fill="var(--dormant-stem)"/><circle cx="74" cy="50" r="22" fill="var(--dormant-stem)"/><circle cx="50" cy="74" r="22" fill="var(--dormant-stem)"/><circle cx="26" cy="50" r="22" fill="var(--dormant-stem)"/><circle cx="50" cy="50" r="18" fill="var(--dormant-ink)"/></svg>
+        <div class="tier-name">Dormant</div>
+      </div>
+    </div>
+    <p class="tiers-caption">Dormant isn't a dead end — log one contact and the same flower starts back toward Blooming.</p>
+  </section>
+
+  <section class="band">
+    <div class="wrap">
+      <div class="band-head reveal">
+        <h2>Built for how relationships actually work</h2>
+        <p>Not every Bloom needs the same amount of water.</p>
+      </div>
+      <div class="feature-list">
+        <div class="feature reveal">
+          <div>
+            <div class="feature-title">Cadence that fits the relationship</div>
+            <p class="feature-desc">Daily, weekly, every two weeks, or a number you set yourself — decay reads from what's normal for that person, not one rule stretched across everyone in your garden.</p>
+          </div>
+          <div class="feature-art">
+            <svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="30" r="20" fill="#B7CE93"/><circle cx="70" cy="50" r="20" fill="#9FC474"/><circle cx="50" cy="70" r="20" fill="#E3B579"/><circle cx="30" cy="50" r="20" fill="#6f9a3f"/></svg>
+          </div>
+        </div>
+        <div class="feature reveal">
+          <div class="feature-art">
+            <svg viewBox="0 0 100 100" aria-hidden="true"><path d="M20 70 L50 20 L80 70 Z" fill="none" stroke="#88B04B" stroke-width="4"/><circle cx="50" cy="55" r="12" fill="#FF6F61"/></svg>
+          </div>
+          <div>
+            <div class="feature-title">Prompts that know the difference</div>
+            <p class="feature-desc">Same city gets "grab coffee this week." Long distance gets "send a voice memo." The daily nudge changes its suggestion based on where you both actually are.</p>
+          </div>
+        </div>
+        <div class="feature reveal">
+          <div>
+            <div class="feature-title">A garden, not a list</div>
+            <p class="feature-desc">Group Blooms into Family, Friends, or tabs you make yourself. Sorted so whoever's health score is lowest — and needs you most — rises to the top.</p>
+          </div>
+          <div class="feature-art">
+            <svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="30" cy="30" r="16" fill="#9FC474"/><circle cx="70" cy="30" r="16" fill="#E3B579"/><circle cx="30" cy="70" r="16" fill="#BDB6AC"/><circle cx="70" cy="70" r="16" fill="#6f9a3f"/></svg>
+          </div>
+        </div>
+        <div class="feature reveal">
+          <div class="feature-art">
+            <svg viewBox="0 0 100 100" aria-hidden="true"><path d="M50 15 C60 15 68 25 68 40 L68 55 L76 65 L24 65 L32 55 L32 40 C32 25 40 15 50 15 Z" fill="#88B04B"/><circle cx="50" cy="78" r="7" fill="#FF6F61"/></svg>
+          </div>
+          <div>
+            <div class="feature-title">Everything, without the noise</div>
+            <p class="feature-desc">A notification bell keeps a quiet, in-app record of prompts and events — no push permissions, no browser pop-ups you never asked for.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band research-band">
+    <div class="wrap">
+      <div class="research-card reveal">
+        <span class="eyebrow">Backed by research</span>
+        <h2>Strong relationships predict how long you live — an effect that rivals quitting smoking.</h2>
+        <p class="research-body">A meta-analysis of 148 studies and over 300,000 people found that people with stronger social relationships were 50% more likely to still be alive years later than those without — a survival effect on par with quitting smoking, and bigger than exercising regularly. So why not spend five minutes today checking in on someone you love? That's how a village gets built: a little, often, not all at once.</p>
+        <button type="button" class="btn-primary" id="landing-research-cta">Start growing your garden →</button>
+        <p class="research-cite">
+          Holt-Lunstad, J., Smith, T. B., &amp; Layton, J. B. (2010).
+          <a href="https://doi.org/10.1371/journal.pmed.1000316" target="_blank" rel="noopener">Social Relationships and Mortality Risk: A Meta-analytic Review</a>.
+          <em>PLoS Medicine</em>, 7(7), e1000316.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <div class="wrap">
+    <div class="final-cta reveal">
+      <h2>Your garden is waiting.</h2>
+      <p>It takes about a minute to plant the first Bloom — no card, no premium tier, nothing to configure first.</p>
+      <button type="button" class="btn-primary" id="landing-final-cta">Plant your first Bloom →</button>
+    </div>
+  </div>
+
+  <footer>
+    <div class="footer-row">
+      <div class="brand" style="font-size:14px">
+        <svg viewBox="0 0 44 44" width="18" height="18" aria-hidden="true">
+          <circle cx="22" cy="8" r="8" fill="#9FC474"/><circle cx="36" cy="22" r="8" fill="#9FC474"/>
+          <circle cx="22" cy="36" r="8" fill="#9FC474"/><circle cx="8" cy="22" r="8" fill="#9FC474"/>
+          <circle cx="22" cy="22" r="6.5" fill="#6f9a3f"/>
+        </svg>
+        Bloom
+      </div>
+      <span>See which Blooms need a little water.</span>
+    </div>
+  </footer>
+
+</div>
+
+<!-- Sign in / Sign up modal — opens on top of the landing page -->
+<div id="modal-signin" class="modal-overlay" hidden>
+  <div class="modal-card auth-card">
+    <div class="auth-mark">
+      <svg viewBox="0 0 44 44" width="44" height="44" aria-hidden="true">
+        <circle cx="22" cy="8" r="8" fill="#9FC474"/>
+        <circle cx="36" cy="22" r="8" fill="#9FC474"/>
+        <circle cx="22" cy="36" r="8" fill="#9FC474"/>
+        <circle cx="8" cy="22" r="8" fill="#9FC474"/>
+        <circle cx="22" cy="22" r="6.5" fill="#6f9a3f"/>
+      </svg>
+      <div class="wordmark">Bloom</div>
+      <div class="subhead">See which Blooms need a little water</div>
+    </div>
+    <form id="signin-form" class="auth-form">
+      <input type="email" id="signin-email" placeholder="Email" autocomplete="email" required />
+      <input type="password" id="signin-password" placeholder="Password" autocomplete="current-password" required />
+      <button type="button" id="forgot-password" class="forgot-link">Forgot password?</button>
+      <p id="signin-error" class="form-error" hidden></p>
+      <p id="signin-success" class="form-success" hidden></p>
+      <button type="submit" class="btn-primary btn-block" id="signin-submit">Sign in</button>
+    </form>
+    <div class="auth-footer">
+      <span id="auth-toggle-label">New here?</span>
+      <button type="button" id="auth-toggle" class="link-btn">Create an account</button>
+    </div>
+    <button type="button" class="modal-close" id="signin-modal-close" aria-label="Close">&times;</button>
+  </div>
+</div>
+
+<div id="app" hidden>
 
   <!-- Dashboard -->
   <section id="view-dashboard" class="view">
@@ -62,6 +264,7 @@
             &#128276;
             <span id="notif-badge" class="notif-badge" hidden>0</span>
           </button>
+          <button id="tour-btn" class="settings-btn" title="How Bloom works" aria-label="How Bloom works">?</button>
           <button id="settings-btn" class="settings-btn" title="Settings" aria-label="Settings">&#9881;&#65039;</button>
           <button id="avatar-btn" class="avatar-btn" title="Account" aria-label="Account"></button>
         </div>
